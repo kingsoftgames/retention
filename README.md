@@ -66,7 +66,7 @@ ES_INDEX                    | 否    |retention|string| elasticsearch index name
 AWS_ACCESS_KEY_ID           | 否    | 无      |string| aws access key id|
 AWS_SECRET_ACCESS_KEY       | 否    | 无      |string| aws secret access key| 
 
-### CREATE_FILE_NAME_PREFIX and LOGIN_FILE_NAME_PREFIX
+### S3_KEY_PREFIX_CREATE_PLAYER and S3_KEY_PREFIX_PLAYER_LOGIN
 
 ```bash
 # 如果日志路径是
