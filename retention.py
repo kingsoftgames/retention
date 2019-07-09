@@ -13,20 +13,21 @@ from datetime import datetime, date, timedelta
 import requests
 from requests.auth import HTTPBasicAuth
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
+import encodings
 
 logger = logging.getLogger(__name__)
 
-REGION = os.getenv("REGION")
-BUCKET_NAME = os.getenv("BUCKET_NAME")
-CREATTE_FILE_NAME_PREFIX = os.getenv("CREATTE_FILE_NAME_PREFIX")
-LOGIN_FILE_NAME_PREFIX = os.getenv("LOGIN_FILE_NAME_PREFIX")
+AWS_REGION = os.getenv("AWS_REGION")
+S3_BUCKET = os.getenv("S3_BUCKET")
+S3_KEY_PREFIX_CREATE_PLAYER = os.getenv("S3_KEY_PREFIX_CREATE_PLAYER")
+S3_KEY_PREFIX_PLAYER_LOGIN = os.getenv("S3_KEY_PREFIX_PLAYER_LOGIN")
 CREATE_PLAYER_EVENT = os.getenv("CREATE_PLAYER_EVENT")
-LOGIN_PLAYER_EVENT = os.getenv("LOGIN_PLAYER_EVENT")
+PLAYER_LOGIN_EVENT = os.getenv("PLAYER_LOGIN_EVENT")
 RETENTION_DAYS = os.getenv("RETENTION_DAYS")
 ES_USER = os.getenv("ES_USER")
 ES_PWD = os.getenv("ES_PWD")
 ES_URL = os.getenv("ES_URL")
-ES_INDEX_NAME = os.getenv("ES_INDEX_NAME", "retention")
+ES_INDEX = os.getenv(" ES_INDEX", "retention")
 
 ARG_DATE_FORMAT = "%Y-%m-%d"
 INVALID_VALUE = -1
@@ -52,26 +53,26 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 def valid_params():
     params_errors = []
-    if is_empty(BUCKET_NAME):
-        params_errors.append("BUCKET_NAME")
+    if is_empty(S3_BUCKET):
+        params_errors.append("S3_BUCKET")
 
-    if is_empty(CREATTE_FILE_NAME_PREFIX):
-        params_errors.append("CREATTE_FILE_NAME_PREFIX")
+    if is_empty(S3_KEY_PREFIX_CREATE_PLAYER):
+        params_errors.append("S3_KEY_PREFIX_CREATE_PLAYER")
 
-    if is_empty(LOGIN_FILE_NAME_PREFIX):
-        params_errors.append("LOGIN_FILE_NAME_PREFIX")
+    if is_empty(S3_KEY_PREFIX_PLAYER_LOGIN):
+        params_errors.append("S3_KEY_PREFIX_PLAYER_LOGIN")
 
     if is_empty(CREATE_PLAYER_EVENT):
         params_errors.append("CREATE_PLAYER_EVENT")
 
-    if is_empty(LOGIN_PLAYER_EVENT):
-        params_errors.append("LOGIN_PLAYER_EVENT")
+    if is_empty(PLAYER_LOGIN_EVENT):
+        params_errors.append("PLAYER_LOGIN_EVENT")
 
     if is_empty(RETENTION_DAYS):
         params_errors.append("RETENTION_DAYS")
 
-    if is_empty(REGION):
-        params_errors.append("REGION")
+    if is_empty(AWS_REGION):
+        params_errors.append("AWS_REGION")
 
     if is_empty(ES_USER):
         params_errors.append("ES_USER")
@@ -150,7 +151,7 @@ def init_bucket():
         if is_empty(aws_secret_access_key):
             os.environ.pop("AWS_SECRET_ACCESS_KEY")
     global bucket
-    bucket = boto3.resource('s3', REGION).Bucket(BUCKET_NAME)
+    bucket = boto3.resource('s3', AWS_REGION).Bucket(S3_BUCKET)
 
 
 def get_yesterday():
@@ -167,7 +168,7 @@ def compute_retention(time_str):
         return ret
     today = date.today().strftime(ARG_DATE_FORMAT)
     days = days_compute(today, time_str)
-    login_set, file_exist = get_players(LOGIN_PLAYER_EVENT, days)
+    login_set, file_exist = get_players(PLAYER_LOGIN_EVENT, days)
     if not file_exist:
         logger.error(f'Login log file not exist. Date: {time_str}')
         return ret
@@ -211,9 +212,9 @@ def get_date_path(event, day):
     has_dates = {}
     path = ""
     if event == CREATE_PLAYER_EVENT:
-        path = CREATTE_FILE_NAME_PREFIX
+        path = S3_KEY_PREFIX_CREATE_PLAYER
     else:
-        path = LOGIN_FILE_NAME_PREFIX
+        path = S3_KEY_PREFIX_PLAYER_LOGIN
     for key, values in FILE_PATH_DATES.items():
         for value in values:
             if value in path:
@@ -254,7 +255,10 @@ def get_players(event, day):
 
 def add_player(player_set, event, filter_prefix):
     for obj in bucket.objects.filter(Prefix=filter_prefix):
-        for line in obj.get()['Body'].read().splitlines():
+        a = obj.get()['Body']
+        stream = encodings.utf_8.StreamReader(obj.get()['Body'])
+        stream.readline
+        for line in stream:
             player_id = get_player_id(event, line)
             if player_id != INVALID_VALUE:
                 player_set.add(player_id)
@@ -275,11 +279,14 @@ def file_exist(filter_prefix):
     return True
 
 
+# log format:time event json obj
 def get_player_id(event, line):
-    obj = json.loads(line)
-    event = obj['event']
-    if obj['event'] == event:
-        return obj[event]['player_id']
+    sub_lines = line.split(" ")
+    if len(sub_lines) < 3:
+        raise RuntimeError()
+    obj = json.loads(sub_lines[2])
+    if sub_lines[1] == event:
+        return obj['player_id']
     return INVALID_VALUE
 
 # ==========================for output to es=============================
@@ -298,7 +305,7 @@ def output_to_es(time_str, retentions):
 
 
 def es_index_exist():
-    url = ES_URL + "/" + ES_INDEX_NAME
+    url = ES_URL + "/" + ES_INDEX
     response = requests.head(url, verify=False, auth=es_auth)
     if response.status_code == requests.codes.ok:
         return True
@@ -310,7 +317,7 @@ def es_index_exist():
 
 
 def es_create_index():
-    url = ES_URL + "/" + ES_INDEX_NAME
+    url = ES_URL + "/" + ES_INDEX
     index_template = get_index_template()
     response = requests.put(url, headers=es_headers,
                             data=index_template, verify=False, auth=es_auth)
@@ -320,8 +327,8 @@ def es_create_index():
 
 
 def es_add_doc(time_str, retention_day, retention):
-    url = ES_URL + "/" + ES_INDEX_NAME + \
-        "/doc/" + es_get_doc_id(time_str, retention_day)
+    url = ES_URL + "/" + ES_INDEX + \
+        "/_doc/" + es_get_doc_id(time_str, retention_day)
     index_doc = es_get_doc(time_str, retention_day, retention)
     response = requests.put(url, headers=es_headers,
                             data=index_doc, verify=False, auth=es_auth)
