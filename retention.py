@@ -138,7 +138,7 @@ def process(time_str):
     init_bucket()
     retentions = compute_retention(time_str)
     output_to_es(time_str, retentions)
-    logger.info("Process sucess.")
+    logger.info("Process end.")
 
 
 def init_bucket():
