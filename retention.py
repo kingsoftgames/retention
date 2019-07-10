@@ -16,6 +16,8 @@ from requests.packages.urllib3.exceptions import InsecureRequestWarning
 import encodings
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(format="%(asctime)s: %(levelname)s: %(message)s")
+logging.root.setLevel(level=logging.INFO)
 
 AWS_REGION = os.getenv("AWS_REGION")
 S3_BUCKET = os.getenv("S3_BUCKET")
@@ -27,7 +29,7 @@ RETENTION_DAYS = os.getenv("RETENTION_DAYS")
 ES_USER = os.getenv("ES_USER")
 ES_PWD = os.getenv("ES_PWD")
 ES_URL = os.getenv("ES_URL")
-ES_INDEX = os.getenv(" ES_INDEX", "retention")
+ES_INDEX = os.getenv("ES_INDEX", "retention")
 
 ARG_DATE_FORMAT = "%Y-%m-%d"
 INVALID_VALUE = -1
@@ -95,8 +97,8 @@ def is_empty(s):
 def arg_parse(*args, **kwargs):
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '-d', '--day',
-        nargs='?',
+        "-d", "--day",
+        nargs="?",
         const=1,
         type=valid_date,
         default=get_yesterday(),
@@ -136,10 +138,10 @@ def process(time_str):
     init_bucket()
     retentions = compute_retention(time_str)
     output_to_es(time_str, retentions)
+    logger.info("Process sucess.")
 
 
 def init_bucket():
-
     aws_access_key_id_name = "AWS_ACCESS_KEY_ID"
     aws_secret_access_key_name = "AWS_SECRET_ACCESS_KEY"
     aws_access_key_id = os.getenv(aws_access_key_id_name)
@@ -151,7 +153,7 @@ def init_bucket():
         if is_empty(aws_secret_access_key):
             os.environ.pop("AWS_SECRET_ACCESS_KEY")
     global bucket
-    bucket = boto3.resource('s3', AWS_REGION).Bucket(S3_BUCKET)
+    bucket = boto3.resource("s3", AWS_REGION).Bucket(S3_BUCKET)
 
 
 def get_yesterday():
@@ -162,6 +164,9 @@ def get_yesterday():
 
 
 def compute_retention(time_str):
+    logger.info(
+        f"Compute retention date:{time_str}. "
+        f"retention days: {RETENTION_DAYS}")
     ret = {}
     retention_days = get_retention_days()
     if len(retention_days) == 0:
@@ -170,7 +175,7 @@ def compute_retention(time_str):
     days = days_compute(today, time_str)
     login_set, file_exist = get_players(PLAYER_LOGIN_EVENT, days)
     if not file_exist:
-        logger.error(f'Login log file not exist. Date: {time_str}')
+        logger.error(f"Login log file not exist. Date: {time_str}")
         return ret
     for key, values in retention_days.items():
         retention = get_retention(login_set, days + values)
@@ -182,7 +187,7 @@ def compute_retention(time_str):
 def get_retention_days():
     ret = {}
     if len(RETENTION_DAYS) == 0:
-        logger.error('Params error. RETENTION_DAYS is empty')
+        logger.error("Params error. RETENTION_DAYS is empty")
         return ret
     days = RETENTION_DAYS.split(COMMA)
     for day in days:
@@ -220,10 +225,10 @@ def get_date_path(event, day):
             if value in path:
                 has_dates[key] = value
     if len(has_dates) != len(FILE_PATH_DATES):
-        logger.error(f'{event} path error. path: {path}')
+        logger.error(f"{event} path error. path: {path}")
         raise RuntimeError()
     d = (date.today() + timedelta(days=day))
-    year = d.strftime('%Y')
+    year = d.strftime("%Y")
     month = get_date_month(has_dates, d)
     day = get_date_day(has_dates, d)
     path = path.replace(has_dates[YEAR], year)
@@ -234,13 +239,13 @@ def get_date_path(event, day):
 
 def get_date_month(has_dates, d):
     if has_dates[MONTH] in FILE_PATH_DOUBLE_DIGITS_DATE:
-        return d.strftime('%m')
+        return d.strftime("%m")
     return str(d.month)
 
 
 def get_date_day(has_dates, d):
     if has_dates[DAY] in FILE_PATH_DOUBLE_DIGITS_DATE:
-        return d.strftime('%d')
+        return d.strftime("%d")
     return str(d.day)
 
 
@@ -250,13 +255,16 @@ def get_players(event, day):
     if not file_exist(filter_prefix):
         return player_set, False
     add_player(player_set, event, filter_prefix)
+    logger.info(
+        f"Get players event:{event} ."
+        f"file prefix:{filter_prefix} ."
+        f"player size: {len(player_set)}")
     return player_set, True
 
 
 def add_player(player_set, event, filter_prefix):
     for obj in bucket.objects.filter(Prefix=filter_prefix):
-        a = obj.get()['Body']
-        stream = encodings.utf_8.StreamReader(obj.get()['Body'])
+        stream = encodings.utf_8.StreamReader(obj.get()["Body"])
         stream.readline
         for line in stream:
             player_id = get_player_id(event, line)
@@ -286,7 +294,7 @@ def get_player_id(event, line):
         raise RuntimeError()
     obj = json.loads(sub_lines[2])
     if sub_lines[1] == event:
-        return obj['player_id']
+        return obj["player_id"]
     return INVALID_VALUE
 
 # ==========================for output to es=============================
@@ -296,8 +304,9 @@ def output_to_es(time_str, retentions):
     if len(retentions) == 0:
         return
     global ES_URL
-    if ES_URL != '/' and ES_URL.endswith('/'):
+    if ES_URL != "/" and ES_URL.endswith("/"):
         ES_URL = ES_URL[:-1]
+    logger.info(f"Output to es. adress: {ES_URL}")
     if not es_index_exist():
         es_create_index()
     for key, values in retentions.items():
@@ -324,6 +333,7 @@ def es_create_index():
     if response.status_code != requests.codes.ok:
         http_error_log(url, response)
         raise requests.HTTPError(response)
+    logger.info(f"Create Index success. url: {url}")
 
 
 def es_add_doc(time_str, retention_day, retention):
@@ -336,6 +346,7 @@ def es_add_doc(time_str, retention_day, retention):
             response.status_code != requests.codes.created):
         http_error_log(url, response)
         raise requests.HTTPError(response)
+    logger.info(f"Add doc success. url: {url}")
 
 
 def es_get_doc(time_str, retention_day, retention):
@@ -350,8 +361,8 @@ def es_get_doc(time_str, retention_day, retention):
 
 def http_error_log(url, response):
     logger.error(
-        f'Http error, Url;{url}. Http code ：{response.status_code}. '
-        f'Http content:{response.content}')
+        f"Http error, Url;{url}. Http code ：{response.status_code}. "
+        f"Http content:{response.content}")
 
 
 def es_get_doc_id(time_str, retention_day):
