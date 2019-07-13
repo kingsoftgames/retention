@@ -326,9 +326,8 @@ def es_index_exist():
 
 def es_create_index():
     url = ES_URL + "/" + ES_INDEX
-    index_template = get_index_template()
     response = requests.put(url, headers=es_headers,
-                            data=index_template, verify=False, auth=es_auth)
+                            verify=False, auth=es_auth)
     if response.status_code != requests.codes.ok:
         http_error_log(url, response)
         raise requests.HTTPError(response)
@@ -371,52 +370,8 @@ def es_get_doc_id(time_str, retention_day):
 
 
 def get_timestamp(time_str):
-    dt = time.mktime(time.strptime(time_str, ARG_DATE_FORMAT))
-    return (int(round(dt * 1000)))
-
-
-def get_index_template():
-    template = {
-        "settings": {
-            "index.refresh_interval": "5s"
-        },
-        "mappings": {
-            "_default_": {
-                "dynamic_templates": [{
-                    "message_field": {
-                        "path_match": "message",
-                        "match_mapping_type": "string",
-                        "mapping": {
-                            "type": "text",
-                                    "norms": False
-                        }
-                    }
-                }, {
-                    "string_fields": {
-                        "match": "*",
-                        "match_mapping_type": "string",
-                        "mapping": {
-                            "type": "text", "norms": False,
-                            "fields": {
-                                    "keyword": {
-                                        "type": "keyword",
-                                        "ignore_above": 256
-                                    }
-                            }
-                        }
-                    }
-                }],
-                "properties": {
-                    "@timestamp": {
-                        "format": "epoch_millis",
-                        "type": "date"
-                    },
-                    "@version": {"type": "keyword"}
-                }
-            }
-        }
-    }
-    return json.dumps(template)
+    return datetime.strptime(
+        time_str, ARG_DATE_FORMAT).replace(microsecond=0).isoformat()
 
 
 def test_output_to_es():
@@ -432,6 +387,8 @@ def test_compute_retention():
 
 if __name__ == '__main__':
     try:
+        # a = get_timestamp("2016-1-1")
+        # print(a)
         sys.exit(arg_parse(*sys.argv))
     except KeyboardInterrupt:
         exit("CTL-C Pressed.")
