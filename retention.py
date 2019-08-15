@@ -306,32 +306,8 @@ def output_to_es(time_str, retentions):
     if ES_URL != "/" and ES_URL.endswith("/"):
         ES_URL = ES_URL[:-1]
     logger.info(f"Output to es. adress: {ES_URL}")
-    if not es_index_exist():
-        es_create_index()
     for key, values in retentions.items():
         es_add_doc(time_str, key, values)
-
-
-def es_index_exist():
-    url = ES_URL + "/" + ES_INDEX
-    response = requests.head(url, verify=False, auth=es_auth)
-    if response.status_code == requests.codes.ok:
-        return True
-    elif response.status_code == requests.codes.not_found:
-        return False
-    else:
-        http_error_log(url, response)
-        raise requests.HTTPError(response)
-
-
-def es_create_index():
-    url = ES_URL + "/" + ES_INDEX
-    response = requests.put(url, headers=es_headers,
-                            verify=False, auth=es_auth)
-    if response.status_code != requests.codes.ok:
-        http_error_log(url, response)
-        raise requests.HTTPError(response)
-    logger.info(f"Create Index success. url: {url}")
 
 
 def es_add_doc(time_str, retention_day, retention):
