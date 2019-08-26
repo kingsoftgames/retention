@@ -55,10 +55,12 @@ def query_match_all(index, data):
     url = url + "/" + index + "/_search?scroll=2m"
     response = requests.post(url, headers=es_json_headers, timeout=60,
                              data=data, verify=False, auth=es_auth)
-    if (response.status_code != requests.codes.ok and
-            response.status_code != requests.codes.created):
+    if response.status_code != requests.codes.ok:
         http_error_log(url, response)
-        raise requests.HTTPError(response)
+        if response.status_code == requests.codes.not_found:
+            return ret
+        else:
+            raise requests.HTTPError(response)
     logger.info(f"Query success. url: {url}, request param is {data}")
     hits, scroll_id = get_hits(response)
     has_more = True

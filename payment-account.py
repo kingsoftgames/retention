@@ -12,7 +12,8 @@ logger = util.get_logger(__name__)
 
 S3_KEY_PREFIX_IAP = os.getenv("S3_KEY_PREFIX_IAP")
 IAP_EVENT = os.getenv("IAP_EVENT")
-ES_INDEX = os.getenv("ES_INDEX", "pay_player")
+ES_PAYMENT_ACCOUNT_INDEX = os.getenv(
+    "ES_PAYMENT_ACCOUNT_INDEX", "payment-account")
 
 bucket = None
 
@@ -88,7 +89,7 @@ def output_to_es(time_str, players):
         end = end + es.ES_BULK_SIZE
         if end >= size:
             end = size
-        es.batch_add_doc(ES_INDEX, "".join(data[start: end]))
+        es.batch_add_doc(ES_PAYMENT_ACCOUNT_INDEX, "".join(data[start: end]))
         logger.info(f"Add docs success. between {start} and {end}")
 
 
