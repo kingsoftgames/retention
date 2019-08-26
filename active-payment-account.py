@@ -8,7 +8,7 @@ import util
 import es
 import s3
 # run afrer payment-account.py
-S3_KEY_PREFIX_PLAYER_LOGIN = os.getenv("S3_KEY_PREFIX_PLAYER_LOGIN")
+S3_KEY_PREFIX = os.getenv("S3_KEY_PREFIX")
 PLAYER_LOGIN_EVENT = os.getenv("PLAYER_LOGIN_EVENT")
 
 ES_PAYMENT_ACCOUNT_INDEX = os.getenv(
@@ -31,8 +31,8 @@ def valid_params():
     if util.is_empty(ES_PAYMENT_ACCOUNT_INDEX):
         params_errors.append("ES_PAYMENT_ACCOUNT_INDEX")
 
-    if util.is_empty(S3_KEY_PREFIX_PLAYER_LOGIN):
-        params_errors.append("S3_KEY_PREFIX_PLAYER_LOGIN")
+    if util.is_empty(S3_KEY_PREFIX):
+        params_errors.append("S3_KEY_PREFIX")
 
     if util.is_empty(ES_ACTIVE_PAYMENT_ACCOUNT_INDEX):
         params_errors.append("ES_ACTIVE_PAYMENT_ACCOUNT_INDEX")
@@ -99,7 +99,7 @@ def get_login_players(time_str):
     logger.info("Get login player from s3")
     days = util.get_days_with_today(time_str)
     logs, exist = util.get_logs(
-        bucket, PLAYER_LOGIN_EVENT, S3_KEY_PREFIX_PLAYER_LOGIN, days)
+        bucket, PLAYER_LOGIN_EVENT, S3_KEY_PREFIX, days)
     if not exist:
         return players, platform_and_channels
     logger.info(f"Login player size is {len(logs)}")
@@ -109,7 +109,6 @@ def get_login_players(time_str):
 
 
 def add_player_by_platform_and_channel(players, platform_and_channels, log):
-    print(log)
     channel = log["channel"]
     key = log["platform"].lower() + "_" + channel.lower()
     if channel in CHANNELS:

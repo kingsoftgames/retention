@@ -10,7 +10,7 @@ import array
 
 logger = util.get_logger(__name__)
 
-S3_KEY_PREFIX_IAP = os.getenv("S3_KEY_PREFIX_IAP")
+S3_KEY_PREFIX = os.getenv("S3_KEY_PREFIX")
 IAP_EVENT = os.getenv("IAP_EVENT")
 ES_PAYMENT_ACCOUNT_INDEX = os.getenv(
     "ES_PAYMENT_ACCOUNT_INDEX", "payment-account")
@@ -21,8 +21,8 @@ bucket = None
 def valid_params():
     params_errors = []
 
-    if util.is_empty(S3_KEY_PREFIX_IAP):
-        params_errors.append("S3_KEY_PREFIX_IAP")
+    if util.is_empty(S3_KEY_PREFIX):
+        params_errors.append("S3_KEY_PREFIX")
 
     if util.is_empty(IAP_EVENT):
         params_errors.append("IAP_EVENT")
@@ -60,7 +60,7 @@ def process(time_str):
 def get_pay_players(time_str):
     player_map = {}
     days = util.get_days_with_today(time_str)
-    logs, exist = util.get_logs(bucket, IAP_EVENT, S3_KEY_PREFIX_IAP, days)
+    logs, exist = util.get_logs(bucket, IAP_EVENT, S3_KEY_PREFIX, days)
     if not exist:
         return player_map
     for log in logs:
