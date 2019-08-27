@@ -172,5 +172,5 @@ def file_exist(bucket, filter_prefix):
     return True
 
 
-def get_pay_player_index_id(player_id, platform, channel):
+def get_paying_users_index_id(player_id, platform, channel):
     return player_id + "_" + platform.lower() + "_" + channel.lower()

@@ -50,21 +50,21 @@ def process(time_str):
     valid_params()
     global bucket
     bucket = s3.init_bucket_from_env()
-    players = get_pay_players(time_str)
+    players = get_paying_users(time_str)
     logger.info(f"Pay player size is {len(players)}")
     output_to_es(time_str, players)
     logger.info("Process end.")
 # ==========================for get logs =============================
 
 
-def get_pay_players(time_str):
+def get_paying_users(time_str):
     player_map = {}
     days = util.get_days_with_today(time_str)
     logs, exist = util.get_logs(bucket, IAP_EVENT, S3_KEY_PREFIX, days)
     if not exist:
         return player_map
     for log in logs:
-        id = util.get_pay_player_index_id(
+        id = util.get_paying_users_index_id(
             log["player_id"], log["platform"], log["channel"])
         player_map[id] = log
     return player_map

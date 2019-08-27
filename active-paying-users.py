@@ -63,27 +63,27 @@ def process(time_str):
     valid_params()
     global bucket
     bucket = s3.init_bucket_from_env()
-    login_players, platform_and_channels = compute_pay_players_login(time_str)
+    login_players, platform_and_channels = compute(time_str)
     output_to_es(time_str, login_players, platform_and_channels)
     logger.info("Process end.")
 
 # ==========================for compute retention==============================
 
 
-def compute_pay_players_login(time_str):
+def compute(time_str):
     login_counts = {}
-    pay_players = get_pay_players()
-    if len(pay_players) == 0:
+    paying_users = get_paying_users()
+    if len(paying_users) == 0:
         return {}, {}
     login_players, platform_and_channels = get_login_players(time_str)
     for key, ids in login_players.items():
-        intersection_set = pay_players.intersection(ids)
+        intersection_set = paying_users.intersection(ids)
         login_size = len(intersection_set)
         login_counts[key] = login_size
     return login_counts, platform_and_channels
 
 
-def get_pay_players():
+def get_paying_users():
     ret = set()
     logger.info("Get pay player from es")
     logs = es.query_match_all(ES_PAYMENT_ACCOUNT_INDEX, es.get_match_all_dsl())
@@ -114,7 +114,7 @@ def add_player_by_platform_and_channel(players, platform_and_channels, log):
     if channel in CHANNELS:
         channel = CHANNELS[channel]
         key = log["platform"].lower() + "_" + channel
-    id = util.get_pay_player_index_id(
+    id = util.get_paying_users_index_id(
             log["player_id"], log["platform"], channel)
     if key not in players:
         platform_and_channels[key] = log
