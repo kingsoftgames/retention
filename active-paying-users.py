@@ -11,10 +11,10 @@ import s3
 S3_KEY_PREFIX = os.getenv("S3_KEY_PREFIX")
 PLAYER_LOGIN_EVENT = os.getenv("PLAYER_LOGIN_EVENT")
 
-ES_PAYMENT_ACCOUNT_INDEX = os.getenv(
-    "ES_PAYMENT_ACCOUNT_INDEX", "payment-account")
-ES_ACTIVE_PAYMENT_ACCOUNT_INDEX = os.getenv(
-    "ES_ACTIVE_PAYMENT_ACCOUNT_INDEX", "active-payment-account")
+ES_PAYING_USERS_INDEX = os.getenv(
+    "ES_PAYING_USERS_INDEX", "payment-account")
+ES_ACTIVE_PAYING_USERS_INDEX = os.getenv(
+    "ES_ACTIVE_PAYING_USERS_INDEX", "active-paying-users")
 
 # channel diff in CHANNELS
 # upper or lower not in CHANNELS
@@ -28,14 +28,14 @@ logger = util.get_logger(__name__)
 
 def valid_params():
     params_errors = []
-    if util.is_empty(ES_PAYMENT_ACCOUNT_INDEX):
-        params_errors.append("ES_PAYMENT_ACCOUNT_INDEX")
+    if util.is_empty(ES_PAYING_USERS_INDEX):
+        params_errors.append("ES_PAYING_USERS_INDEX")
 
     if util.is_empty(S3_KEY_PREFIX):
         params_errors.append("S3_KEY_PREFIX")
 
-    if util.is_empty(ES_ACTIVE_PAYMENT_ACCOUNT_INDEX):
-        params_errors.append("ES_ACTIVE_PAYMENT_ACCOUNT_INDEX")
+    if util.is_empty(ES_ACTIVE_PAYING_USERS_INDEX):
+        params_errors.append("ES_ACTIVE_PAYING_USERS_INDEX")
 
     if util.is_empty(PLAYER_LOGIN_EVENT):
         params_errors.append("PLAYER_LOGIN_EVENT")
@@ -86,7 +86,7 @@ def compute(time_str):
 def get_paying_users():
     ret = set()
     logger.info("Get pay player from es")
-    logs = es.query_match_all(ES_PAYMENT_ACCOUNT_INDEX, es.get_match_all_dsl())
+    logs = es.query_match_all(ES_PAYING_USERS_INDEX, es.get_match_all_dsl())
     logger.info(f"Pay player size is {len(logs)}")
     for log in logs:
         ret.add(log["_id"])
@@ -132,7 +132,7 @@ def output_to_es(time_str, login_counts, platform_and_channels):
     if len(login_counts) == 0:
         return
     for key, count in login_counts.items():
-        path = ES_ACTIVE_PAYMENT_ACCOUNT_INDEX + "/_doc/" + key
+        path = ES_ACTIVE_PAYING_USERS_INDEX + "/_doc/" + key
         platform_and_channel = platform_and_channels[key]
         platform = platform_and_channel["platform"]
         channel = platform_and_channel["channel"]
