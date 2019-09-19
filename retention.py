@@ -291,9 +291,12 @@ def get_player_id(event, line):
     sub_lines = line.split(" ")
     if len(sub_lines) < 3:
         raise RuntimeError()
-    obj = json.loads(sub_lines[2])
-    if sub_lines[1] == event:
-        return obj["player_id"]
+    try:
+        obj = json.loads(sub_lines[2])
+        if sub_lines[1] == event:
+            return obj["player_id"]
+    except json.JSONDecodeError:
+        logger.error(f"Json parse error. json string is: {line}")
     return INVALID_VALUE
 
 # ==========================for output to es=============================
