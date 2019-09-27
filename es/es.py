@@ -4,7 +4,7 @@ import requests
 import os
 from requests.auth import HTTPBasicAuth
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
-import util
+from util import util
 import json
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
@@ -20,7 +20,7 @@ es_json_headers = {"Content-Type": "application/json"}
 es_x_ndjson_headers = {"Content-Type": "application/x-ndjson"}
 es_auth = HTTPBasicAuth(ES_USER, ES_PWD)
 
-logger = util.get_logger(__name__)
+logger = logging.getLogger()
 
 
 def add_doc(path, data):

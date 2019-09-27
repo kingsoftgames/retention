@@ -2,9 +2,9 @@
 import logging
 import os
 import boto3
-import util
+from util import util
 
-logger = util.get_logger(__name__)
+logger = logging.getLogger()
 
 AWS_REGION = os.getenv("AWS_REGION")
 S3_BUCKET = os.getenv("S3_BUCKET")

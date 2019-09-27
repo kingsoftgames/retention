@@ -19,16 +19,7 @@ FILE_PATH_DATES = {
 FILE_PATH_DOUBLE_DIGITS_DATE = {"<MM>", "<dd>"}
 
 
-def get_logger(name):
-    logger = logging.getLogger(name)
-    format = "%(asctime)s: %(levelname)s:" \
-        " %(module)s: %(funcName)s: %(message)s"
-    logging.basicConfig(format=format)
-    logging.root.setLevel(level=logging.INFO)
-    return logger
-
-
-logger = get_logger(__name__)
+logger = logging.getLogger()
 
 
 def valid_date(time_str):

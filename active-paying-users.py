@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-import logging
 import os
 import json
 import argparse
 import sys
-import util
-import es
-import s3
+
+from util import util
+from s3 import s3
+from es import es
+from eslog import eslog
 # run afrer payment-account.py
 S3_KEY_PREFIX = os.getenv("S3_KEY_PREFIX")
 PLAYER_LOGIN_EVENT = os.getenv("PLAYER_LOGIN_EVENT")
 
 ES_PAYING_USERS_INDEX = os.getenv(
-    "ES_PAYING_USERS_INDEX", "payment-account")
+    "ES_PAYING_USERS_INDEX", "paying-users")
 ES_ACTIVE_PAYING_USERS_INDEX = os.getenv(
     "ES_ACTIVE_PAYING_USERS_INDEX", "active-paying-users")
 
@@ -23,7 +24,7 @@ CHANNELS = {
 }
 
 bucket = None
-logger = util.get_logger(__name__)
+logger = eslog.get_logger(ES_ACTIVE_PAYING_USERS_INDEX)
 
 
 def valid_params():
@@ -159,7 +160,8 @@ if __name__ == '__main__':
     try:
         sys.exit(arg_parse(*sys.argv))
     except KeyboardInterrupt:
+        logger.info("CTL-C Pressed.")
         exit("CTL-C Pressed.")
     except Exception as e:
-        logging.exception(e)
+        logger.exception(e)
         exit("Exception")

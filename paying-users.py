@@ -3,18 +3,19 @@ import os
 import json
 import argparse
 import sys
-import util
-import s3
-import es
 import array
 
-logger = util.get_logger(__name__)
+from util import util
+from s3 import s3
+from es import es
+from eslog import eslog
 
 S3_KEY_PREFIX = os.getenv("S3_KEY_PREFIX")
 IAP_EVENT = os.getenv("IAP_EVENT")
 ES_PAYING_USERS_INDEX = os.getenv(
     "ES_PAYING_USERS_INDEX", "paying-users")
 
+logger = eslog.get_logger(ES_PAYING_USERS_INDEX)
 bucket = None
 
 
@@ -118,7 +119,8 @@ if __name__ == '__main__':
     try:
         sys.exit(arg_parse(*sys.argv))
     except KeyboardInterrupt:
+        logger.info("CTL-C Pressed.")
         exit("CTL-C Pressed.")
     except Exception as e:
-        logging.exception(e)
+        logger.exception(e)
         exit("Exception")

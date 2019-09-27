@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import logging
 import os
 import boto3
 import json
@@ -13,10 +12,7 @@ import requests
 from requests.auth import HTTPBasicAuth
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 import encodings
-
-logger = logging.getLogger(__name__)
-logging.basicConfig(format="%(asctime)s: %(levelname)s: %(message)s")
-logging.root.setLevel(level=logging.INFO)
+from eslog import eslog
 
 AWS_REGION = os.getenv("AWS_REGION")
 S3_BUCKET = os.getenv("S3_BUCKET")
@@ -45,6 +41,9 @@ FILE_PATH_DATES = {
 }
 
 FILE_PATH_DOUBLE_DIGITS_DATE = {"<MM>", "<dd>"}
+
+logger = eslog.get_logger(ES_INDEX)
+
 es_headers = {"Content-Type": "application/json"}
 es_auth = HTTPBasicAuth(ES_USER, ES_PWD)
 
@@ -370,7 +369,8 @@ if __name__ == '__main__':
         # print(a)
         sys.exit(arg_parse(*sys.argv))
     except KeyboardInterrupt:
+        logger.exception("CTL-C Pressed.")
         exit("CTL-C Pressed.")
     except Exception as e:
-        logging.exception(e)
+        logger.exception(e)
         exit("Exception")
