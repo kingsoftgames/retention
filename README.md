@@ -150,6 +150,15 @@ elasticsearch中的日志格式
 }
 ```
 
+## 日志收集
 
+```py
+# 计算脚本 例如：retention.py
+from eslog import eslog
+logger = eslog.get_logger("要计算的es的index")
+
+# 其余脚本 util
+logger = logging.getLogger()
+```
 
 
