@@ -5,7 +5,6 @@ import json
 import time
 from datetime import datetime, date, timedelta
 import encodings
-import pytz
 
 ARG_DATE_FORMAT = "%Y-%m-%d"
 INVALID_VALUE = -1
@@ -175,10 +174,9 @@ def get_days_for_timezone(day):
     date_format = "%Y-%m-%d %H:%M:%S"
     days = []
     now = datetime.now()
-    now_to_utc = now.astimezone(pytz.timezone("UTC"))
     local_time_str = now.strftime(date_format)
-    utc_time_str = now_to_utc.strftime(date_format)
     local_time = time.mktime(time.strptime(local_time_str, date_format))
+    utc_time_str = datetime.utcfromtimestamp(local_time).strftime(date_format)
     utc_time = time.mktime(time.strptime(utc_time_str, date_format))
     diff = int(local_time)-int(utc_time)
     if diff > 0:
