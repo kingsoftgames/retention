@@ -98,7 +98,7 @@ def arg_parse(*args, **kwargs):
     parser.add_argument(
         "-d", "--day",
         nargs="?",
-        const=1,
+        const=get_yesterday(),
         type=valid_date,
         default=get_yesterday(),
         help="Date. The default date is yesterday. The format is YYYY-MM-DD"
