@@ -5,6 +5,7 @@ import json
 import time
 from datetime import datetime, date, timedelta
 import encodings
+import pytz
 
 ARG_DATE_FORMAT = "%Y-%m-%d"
 INVALID_VALUE = -1
@@ -168,3 +169,32 @@ def file_exist(bucket, filter_prefix):
 
 def get_paying_users_index_id(player_id, platform, channel):
     return player_id + "_" + platform.lower() + "_" + channel.lower()
+
+
+def get_days_for_timezone(day):
+    date_format = "%Y-%m-%d %H:%M:%S"
+    days = []
+    now = datetime.now()
+    now_to_utc = now.astimezone(pytz.timezone("UTC"))
+    local_time_str = now.strftime(date_format)
+    utc_time_str = now_to_utc.strftime(date_format)
+    local_time = time.mktime(time.strptime(local_time_str, date_format))
+    utc_time = time.mktime(time.strptime(utc_time_str, date_format))
+    diff = int(local_time)-int(utc_time)
+    if diff > 0:
+        days.append(day-1)
+    if diff < 0:
+        days.append(day+1)
+    days.append(day)
+    return days
+
+
+def get_start_timestamp(day):
+    d = (date.today() + timedelta(days=day))
+    return int(time.mktime(time.strptime(str(d), ARG_DATE_FORMAT)))
+
+
+def get_end_timestamp(day):
+    day = day + 1
+    d = (date.today() + timedelta(days=day))
+    return int(time.mktime(time.strptime(str(d), ARG_DATE_FORMAT))) - 1

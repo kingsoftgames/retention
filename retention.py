@@ -13,6 +13,7 @@ from requests.auth import HTTPBasicAuth
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 import encodings
 from eslog import eslog
+from util import util
 
 AWS_REGION = os.getenv("AWS_REGION")
 S3_BUCKET = os.getenv("S3_BUCKET")
@@ -179,6 +180,7 @@ def compute_retention(time_str):
         retention = get_retention(login_set, days + values)
         if retention != INVALID_VALUE:
             ret[key] = retention
+    logger.info(f"Compute retention result:{ret}. ")
     return ret
 
 
@@ -209,6 +211,15 @@ def get_retention(login_set, days):
     intersection_set = create_set.intersection(login_set)
     login_size = len(intersection_set)
     return round(login_size/ceate_size, 2)
+
+
+def get_date_paths(event, day):
+    paths = []
+    days = util.get_days_for_timezone(day)
+    for d in days:
+        get_date_path(event, d)
+        paths.append(get_date_path(event, d))
+    return paths
 
 
 def get_date_path(event, day):
@@ -249,23 +260,27 @@ def get_date_day(has_dates, d):
 
 def get_players(event, day):
     player_set = set()
-    filter_prefix = get_date_path(event, day)
-    if not file_exist(filter_prefix):
+    filter_prefixs = get_date_paths(event, day)
+    if len(filter_prefixs) == 0:
         return player_set, False
-    add_player(player_set, event, filter_prefix)
+    start_time = util.get_start_timestamp(day)
+    end_time = util.get_end_timestamp(day)
+    for filter_prefix in filter_prefixs:
+        if file_exist(filter_prefix):
+            add_player(player_set, event, filter_prefix, start_time, end_time)
     logger.info(
         f"Get players event:{event} ."
-        f"file prefix:{filter_prefix} ."
+        f"file prefixs:{filter_prefixs} ."
         f"player size: {len(player_set)}")
     return player_set, True
 
 
-def add_player(player_set, event, filter_prefix):
+def add_player(player_set, event, filter_prefix, start_time, end_time):
     for obj in bucket.objects.filter(Prefix=filter_prefix):
         stream = encodings.utf_8.StreamReader(obj.get()["Body"])
         stream.readline
         for line in stream:
-            player_id = get_player_id(event, line)
+            player_id = get_player_id(event, line, start_time, end_time)
             if player_id != INVALID_VALUE:
                 player_set.add(player_id)
 
@@ -286,14 +301,16 @@ def file_exist(filter_prefix):
 
 
 # log format:time event json obj
-def get_player_id(event, line):
+def get_player_id(event, line, start_time, end_time):
     sub_lines = line.split(" ")
     if len(sub_lines) < 3:
         raise RuntimeError()
     try:
         obj = json.loads(sub_lines[2])
         if sub_lines[1] == event:
-            return obj["player_id"]
+            log_time = int(sub_lines[0])
+            if log_time >= start_time and log_time < end_time:
+                return obj["player_id"]
     except json.JSONDecodeError:
         logger.error(f"Json parse error. json string is: {line}")
     return INVALID_VALUE
@@ -365,8 +382,6 @@ def test_compute_retention():
 
 if __name__ == '__main__':
     try:
-        # a = get_timestamp("2016-1-1")
-        # print(a)
         sys.exit(arg_parse(*sys.argv))
     except KeyboardInterrupt:
         logger.exception("CTL-C Pressed.")
