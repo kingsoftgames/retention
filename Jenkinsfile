@@ -13,12 +13,9 @@ pipeline {
     }
 
     parameters {
-        string(name: 'PROJECT_NAME',
-            defaultValue: 'Pirates/Server/pirates-server/master',
-            description: 'Full name of the build project. Example: Pirates/Server/pirates-server/master')
-        string(name: 'PROJECT_BUILD_NUMBER',
-            defaultValue: '',
-            description: 'Which build number to copy')
+        booleanParam(name: 'AUTO_DEPLOY',
+            defaultValue: true,
+            description: 'When checked, will automatically deploy to dev environment.')
     }
 
     environment {
