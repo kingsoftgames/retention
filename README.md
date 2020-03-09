@@ -162,3 +162,13 @@ logger = logging.getLogger()
 ```
 
 
+## requirements 生成方式
+
+```bash
+# 使用pipreqs，参数是工程目录
+pipreqs retention
+```
+
+## Jenkinsfile 注意事项
+
+Jenkins SCM 添加 checkout to a sub-directory，值为retention。 
