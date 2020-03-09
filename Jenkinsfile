@@ -39,7 +39,7 @@ pipeline {
             }
         }
 
-        stage('Package') {
+        stage('Install Requirements') {
             steps {
                 dir(env.RETENTION_BUILD_SCRIPT_DIR) {
                     sh """
@@ -49,11 +49,18 @@ pipeline {
                 }
             }
         }
-        
+
+        stage('Package') {
+            steps {
+                script {
+                    def artifactName = artifactName(name: 'rentention', extension: "tar.gz")
+                    sh "tar czf ${env.WORKSPACE}/${artifactName} ${env.RETENTION_ARCHIVE_DIR}/"
+                }
+            }
+        }
+
         stage('Archive') {
             steps {
-                def artifactName = artifactName(name: 'rentention', extension: "tar.gz")
-                sh "tar czf ${env.WORKSPACE}/${artifactName} ${env.RETENTION_ARCHIVE_DIR}/"
                 archiveArtifacts artifacts: '*.tar.gz', onlyIfSuccessful: true
             }
         }
