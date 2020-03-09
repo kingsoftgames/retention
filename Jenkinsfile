@@ -40,7 +40,7 @@ pipeline {
             steps {
                 dir(env.RETENTION_CHECKOUT_DIR) {
                     sh """
-                        pip3 install -r requirements.txt -t ${env.RETENTION_ARCHIVE_DIR}
+                        sudo pip3 install -r requirements.txt -t ${env.RETENTION_ARCHIVE_DIR}
                         cp -r ${env.RETENTION_CHECKOUT_DIR}/* ${env.RETENTION_ARCHIVE_DIR}
                     """
                 }
