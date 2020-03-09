@@ -22,7 +22,7 @@ pipeline {
         RETENTION_BUILD_SCRIPT_DIR = "${env.WORKSPACE}/retention"
         RETENTION_LIB_DIR = "${env.WORKSPACE}/libs"
         RETENTION_ARCHIVE_DIR = "${env.WORKSPACE}/retention-archive"
-        RETENTION_ZIP_NAME = "rentention.zip"
+        RETENTION_ZIP_NAME = "rentention-${env.BUILD_ID}-${date}.zip"
         RETENTION_ZIP = "${env.RETENTION_ARCHIVE_DIR}/${env.RETENTION_ZIP_NAME}"
     }
 
