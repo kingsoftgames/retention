@@ -46,7 +46,7 @@ pipeline {
                 dir(env.RETENTION_BUILD_SCRIPT_DIR) {
                     sh """
                         pip3 install -r requirements.txt -t ${env.RETENTION_ARCHIVE_DIR}
-                        cp -r ${env.RETENTION_BUILD_SCRIPT_DIR} ${env.RETENTION_ARCHIVE_DIR}
+                        cp -r ${env.RETENTION_BUILD_SCRIPT_DIR}/* ${env.RETENTION_ARCHIVE_DIR}
                     """
                 }
             }
