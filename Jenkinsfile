@@ -12,23 +12,16 @@ pipeline {
         ))
     }
 
-    parameters {
-        booleanParam(name: 'AUTO_DEPLOY',
-            defaultValue: true,
-            description: 'When checked, will automatically deploy to dev environment.')
-    }
-
     environment {
-        RETENTION_BUILD_DATE = sh(script: 'echo `date +%Y%m%d`', , returnStdout: true).trim()
         RETENTION_BUILD_SCRIPT_DIR = "${env.WORKSPACE}/retention"
         RETENTION_ARCHIVE_DIR = "${env.WORKSPACE}/retention-archive"
-        RETENTION_ZIP_NAME = "rentention-b${env.BUILD_ID}-${RETENTION_BUILD_DATE}.zip"
     }
 
     stages {
         stage('Clean Libs') {
             steps {
                  sh """
+                    rm -rf *.tar.gz
                     rm -rf ${env.RETENTION_ARCHIVE_DIR}
                     mkdir -p  ${env.RETENTION_ARCHIVE_DIR}
                 """
@@ -41,7 +34,7 @@ pipeline {
             }
         }
 
-        stage('Package') {
+        stage('Install Requirements') {
             steps {
                 dir(env.RETENTION_BUILD_SCRIPT_DIR) {
                     sh """
@@ -51,9 +44,19 @@ pipeline {
                 }
             }
         }
+
+        stage('Package') {
+            steps {
+                script {
+                    def artifactName = artifactName(name: 'rentention', extension: "tar.gz")
+                    sh "tar czf ${env.WORKSPACE}/${artifactName} ${env.RETENTION_ARCHIVE_DIR}/"
+                }
+            }
+        }
+
         stage('Archive') {
             steps {
-                zip archive: true, dir: env.RETENTION_ARCHIVE_DIR, zipFile: env.RETENTION_ZIP_NAME
+                archiveArtifacts artifacts: '*.tar.gz', onlyIfSuccessful: true
             }
         }
     }
