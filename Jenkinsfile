@@ -31,8 +31,8 @@ pipeline {
             steps {
                  sh """
                     rm -rf ${env.RETENTION_LIB_DIR}
-                    mdir -p  ${env.RETENTION_LIB_DIR}
-                    mdir -p  ${env.RETENTION_ARCHIVE_DIR}
+                    mkdir -p  ${env.RETENTION_LIB_DIR}
+                    mkdir -p  ${env.RETENTION_ARCHIVE_DIR}
                     rm  ${env.RETENTION_ZIP}
                 """
             }
