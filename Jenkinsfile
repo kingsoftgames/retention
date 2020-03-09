@@ -19,10 +19,8 @@ pipeline {
     }
 
     environment {
-        RETENTION_BUILD_DATE = sh(script: 'echo `date +%Y%m%d`', , returnStdout: true).trim()
         RETENTION_BUILD_SCRIPT_DIR = "${env.WORKSPACE}/retention"
         RETENTION_ARCHIVE_DIR = "${env.WORKSPACE}/retention-archive"
-        RETENTION_ZIP_NAME = "rentention-b${env.BUILD_ID}-${RETENTION_BUILD_DATE}.zip"
     }
 
     stages {
@@ -51,9 +49,12 @@ pipeline {
                 }
             }
         }
+        
         stage('Archive') {
             steps {
-                zip archive: true, dir: env.RETENTION_ARCHIVE_DIR, zipFile: env.RETENTION_ZIP_NAME
+                def artifactName = artifactName(name: 'rentention', extension: "tar.gz")
+                sh "tar czf ${env.WORKSPACE}/${artifactName} ${env.RETENTION_ARCHIVE_DIR}/"
+                archiveArtifacts artifacts: '*.tar.gz', onlyIfSuccessful: true
             }
         }
     }
