@@ -169,6 +169,3 @@ logger = logging.getLogger()
 pipreqs retention
 ```
 
-## Jenkinsfile 注意事项
-
-Jenkins SCM 添加 checkout to a sub-directory，值为retention。 
