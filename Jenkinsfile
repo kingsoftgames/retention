@@ -19,7 +19,7 @@ pipeline {
     }
 
     environment {
-        RETENTION_BUILD_DATE = sh(script: 'echo `date +%Y-%m-%d`', , returnStdout: true).trim()
+        RETENTION_BUILD_DATE = sh(script: 'echo `date +%Y%m%d`', , returnStdout: true).trim()
         RETENTION_BUILD_SCRIPT_DIR = "${env.WORKSPACE}/retention"
         RETENTION_LIB_DIR = "${env.WORKSPACE}/libs"
         RETENTION_ARCHIVE_DIR = "${env.WORKSPACE}/retention-archive"
