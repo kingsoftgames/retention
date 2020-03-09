@@ -12,12 +12,6 @@ pipeline {
         ))
     }
 
-    parameters {
-        booleanParam(name: 'AUTO_DEPLOY',
-            defaultValue: true,
-            description: 'When checked, will automatically deploy to dev environment.')
-    }
-
     environment {
         RETENTION_BUILD_SCRIPT_DIR = "${env.WORKSPACE}/retention"
         RETENTION_ARCHIVE_DIR = "${env.WORKSPACE}/retention-archive"
