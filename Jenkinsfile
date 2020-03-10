@@ -20,9 +20,8 @@ pipeline {
     stages {
         stage('Clean Libs') {
             steps {
+                cleanWs()
                  sh """
-                    rm -rf *.tar.gz
-                    rm -rf ${env.RETENTION_ARCHIVE_DIR}
                     mkdir -p  ${env.RETENTION_ARCHIVE_DIR}
                 """
             }
@@ -40,6 +39,7 @@ pipeline {
             steps {
                 dir(env.RETENTION_CHECKOUT_DIR) {
                     sh """
+                        pip3 -V
                         pip3 install -r requirements.txt -t ${env.RETENTION_ARCHIVE_DIR}
                         cp -r ${env.RETENTION_CHECKOUT_DIR}/* ${env.RETENTION_ARCHIVE_DIR}
                     """
