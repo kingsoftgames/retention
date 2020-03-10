@@ -20,9 +20,8 @@ pipeline {
     stages {
         stage('Clean Libs') {
             steps {
+                cleanWs()
                  sh """
-                    rm -rf *.tar.gz
-                    rm -rf ${env.RETENTION_ARCHIVE_DIR}
                     mkdir -p  ${env.RETENTION_ARCHIVE_DIR}
                 """
             }
