@@ -87,25 +87,92 @@ def get_date_day(has_dates, d):
     return str(d.day)
 
 
-def get_player_ids(bucket, event, s3_key_prefix, days):
+def get_date_paths(s3_key_prefix, day):
+    paths = []
+    days = get_days_for_timezone(day)
+    for d in days:
+        paths.append(get_prefix(s3_key_prefix, d))
+    return paths
+
+
+def get_players_multiple_days(bucket, event, s3_key_prefix, days):
+    filter_prefixs_set = set()
     player_set = set()
-    logs, exist = get_logs(bucket, event, s3_key_prefix, days)
-    if not exist:
-        return player_set
-    for log in logs:
-        player_set.add(log["player_id"])
+    today = date.today().strftime(ARG_DATE_FORMAT)
+    for day in days:
+        d = days_compute(today, day)
+        filter_prefixs = get_date_paths(s3_key_prefix, d)
+        if len(filter_prefixs) > 0:
+            filter_prefixs_set.update(filter_prefixs)
+    if len(filter_prefixs_set) == 0:
+        return player_set, True
+    start_time = get_start_timestamp_time_str(days[0])
+    end_time = get_end_timestamp_time_str(days[-1])
+    for filter_prefix in filter_prefixs_set:
+        if file_exist(bucket, filter_prefix, event):
+            add_player(
+                bucket, player_set, event, filter_prefix, start_time, end_time)
     logger.info(
-        f"Get player ids event:{event} ."
-        f"file prefix:{filter_prefix} ."
-        f"player id size: {len(player_set)}")
-    return player_set
+        f"Get players event:{event} ."
+        f"file prefixs:{filter_prefixs_set} ."
+        f"Date start: {days[0]} ."
+        f"end: {days[-1]}."
+        f"player size: {len(player_set)}")
+    return player_set, True
+
+
+def get_players(bucket, event, s3_key_prefix, day):
+    player_set = set()
+    filter_prefixs = get_date_paths(s3_key_prefix, day)
+    if len(filter_prefixs) == 0:
+        return player_set, False
+    start_time = get_start_timestamp(day)
+    end_time = get_end_timestamp(day)
+    for filter_prefix in filter_prefixs:
+        print(filter_prefix)
+        if file_exist(bucket, filter_prefix, event):
+            add_player(
+                bucket, player_set, event, filter_prefix, start_time, end_time)
+    logger.info(
+        f"Get players event:{event} ."
+        f"file prefixs:{filter_prefixs} ."
+        f"player size: {len(player_set)}")
+    return player_set, True
+
+
+def add_player(bucket, player_set, event, filter_prefix, start_time, end_time):
+    for obj in bucket.objects.filter(Prefix=filter_prefix):
+        stream = encodings.utf_8.StreamReader(obj.get()["Body"])
+        stream.readline
+        for line in stream:
+            player_id = get_player_id(event, line, start_time, end_time)
+            if player_id != INVALID_VALUE:
+                player_set.add(player_id)
+
+
+# log format:time event json obj
+def get_player_id(event, line, start_time, end_time):
+    sub_lines = line.split(" ")
+    if len(sub_lines) < 3:
+        raise RuntimeError()
+    try:
+        obj = json.loads(sub_lines[2])
+        if sub_lines[1] == event:
+            log_time = int(sub_lines[0])
+            if log_time >= start_time and log_time < end_time:
+                return obj["player_id"]
+    except json.JSONDecodeError:
+        logger.error(f"Json parse error. json string is: {line}")
+    return INVALID_VALUE
 
 
 def get_logs(bucket, event, s3_key_prefix, days):
     logs = []
     filter_prefix = get_prefix(s3_key_prefix, days)
-    if not file_exist(bucket, filter_prefix):
+    if not file_exist(bucket, filter_prefix, event):
         return logs, False
+    start_time = get_start_timestamp(day)
+    end_time = get_end_timestamp(day)
     add_logs(bucket, logs, event, filter_prefix)
     logger.info(
         f"Get logs event:{event} ."
@@ -114,26 +181,28 @@ def get_logs(bucket, event, s3_key_prefix, days):
     return logs, True
 
 
-def add_logs(bucket, logs, event, filter_prefix):
+def add_logs(bucket, logs, event, filter_prefix, start_time, end_time):
     for obj in bucket.objects.filter(Prefix=filter_prefix):
         stream = encodings.utf_8.StreamReader(obj.get()["Body"])
         stream.readline
         for line in stream:
-            obj = get_log(line, event)
+            obj = get_log(line, event, start_time, end_time)
             if obj:
                 logs.append(obj)
 
 
 # log format:time event json obj
-def get_log(line, event):
+def get_log(line, event, start_time, end_time):
     sub_lines = line.split(" ")
     if len(sub_lines) < 3:
         raise RuntimeError()
     try:
         obj = json.loads(sub_lines[2])
         if sub_lines[1] == event:
-            obj["time"] = sub_lines[0]
-            return obj
+            log_time = int(sub_lines[0])
+            if log_time >= start_time and log_time < end_time:
+                obj["time"] = log_time
+                return obj
     except json.JSONDecodeError:
         logger.error(f"Json parse error. json string is: {line}")
     return None
@@ -151,13 +220,15 @@ def get_days_with_today(any_day):
     return (date2-date1).days
 
 
-def file_exist(bucket, filter_prefix):
+def file_exist(bucket, filter_prefix, event):
     files = bucket.objects.filter(Prefix=filter_prefix)
     size = 0
     for b in files:
         size = size + 1
     if size == 0:
-        logger.warn(f"File not exist. file name: {filter_prefix}",)
+        logger.warn(
+            f"File not exist. file name: {filter_prefix} ."
+            f"event: {event}")
         return False
     for obj in files:
         if obj.key.find(filter_prefix) < 0:
@@ -187,6 +258,17 @@ def get_days_for_timezone(day):
     return days
 
 
+def get_start_timestamp_time_str(time_str):
+    d = datetime.strptime(time_str, ARG_DATE_FORMAT).date()
+    return int(time.mktime(time.strptime(str(d), ARG_DATE_FORMAT)))
+
+
+def get_end_timestamp_time_str(time_str):
+    dt = datetime.strptime(time_str, ARG_DATE_FORMAT)
+    d = (dt.date() + timedelta(days=1))
+    return int(time.mktime(time.strptime(str(d), ARG_DATE_FORMAT))) - 1
+
+
 def get_start_timestamp(day):
     d = (date.today() + timedelta(days=day))
     return int(time.mktime(time.strptime(str(d), ARG_DATE_FORMAT)))
@@ -196,3 +278,79 @@ def get_end_timestamp(day):
     day = day + 1
     d = (date.today() + timedelta(days=day))
     return int(time.mktime(time.strptime(str(d), ARG_DATE_FORMAT))) - 1
+
+
+def days_compute(today, any_day):
+    date1 = datetime.strptime(today, ARG_DATE_FORMAT)
+    date2 = datetime.strptime(any_day, ARG_DATE_FORMAT)
+    return (date2-date1).days
+
+
+# w 是周一为第一天
+def is_first_day_of_week(time_str):
+    day = datetime.strptime(time_str, ARG_DATE_FORMAT).strftime("%w")
+    return day == "1"
+
+
+def is_first_day_of_month(time_str):
+    day = datetime.strptime(time_str, ARG_DATE_FORMAT)
+    firstDay = date(day.year, day.month, 1)
+    return firstDay.day == day.day
+
+
+def get_previous_one_week_days(time_str):
+    start, end = get_previous_one_week(time_str)
+    return get_date_list(start, end)
+
+
+def get_previous_one_month_days(time_str):
+    start, end = get_previous_one_month(time_str)
+    return get_date_list(start, end)
+
+
+def get_date_list(start, end):
+    start = datetime.strptime(start, ARG_DATE_FORMAT)
+    end = datetime.strptime(end, ARG_DATE_FORMAT)
+    data = []
+    days = (end-start).days + 1
+    day = timedelta(days=1)
+    for d in range(days):
+        data.append((start + day*d).strftime(ARG_DATE_FORMAT))
+    return data
+
+
+def get_previous_one_week(time_str):
+    print(time_str)
+    d = datetime.strptime(time_str, ARG_DATE_FORMAT)
+    dayscount = timedelta(days=d.isoweekday())
+    dayto = d - dayscount
+    sixdays = timedelta(days=6)
+    dayfrom = dayto - sixdays
+    date_from = datetime(
+        dayfrom.year, dayfrom.month, dayfrom.day).strftime(
+            ARG_DATE_FORMAT)
+    date_to = datetime(
+        dayto.year, dayto.month, dayto.day).strftime(
+            ARG_DATE_FORMAT)
+    logger.info(
+        f"Get week start:{date_from} ."
+        f"week end:{date_to} ."
+        f"compute date: {time_str}")
+    return date_from, date_to
+
+
+def get_previous_one_month(time_str):
+    d = datetime.strptime(time_str, ARG_DATE_FORMAT)
+    dayscount = timedelta(days=d.day)
+    dayto = d - dayscount
+    date_from = datetime(
+        dayto.year, dayto.month, 1).strftime(
+            ARG_DATE_FORMAT)
+    date_to = datetime(
+        dayto.year, dayto.month, dayto.day).strftime(
+            ARG_DATE_FORMAT)
+    logger.info(
+        f"Get month start:{date_from} ."
+        f"week month:{date_to} ."
+        f"compute date: {time_str}")
+    return date_from, date_to

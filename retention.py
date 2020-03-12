@@ -14,83 +14,44 @@ from requests.packages.urllib3.exceptions import InsecureRequestWarning
 import encodings
 from eslog import eslog
 from util import util
+from s3 import s3
+from es import es
 
-AWS_REGION = os.getenv("AWS_REGION")
-S3_BUCKET = os.getenv("S3_BUCKET")
 S3_KEY_PREFIX_CREATE_PLAYER = os.getenv("S3_KEY_PREFIX_CREATE_PLAYER")
 S3_KEY_PREFIX_PLAYER_LOGIN = os.getenv("S3_KEY_PREFIX_PLAYER_LOGIN")
 CREATE_PLAYER_EVENT = os.getenv("CREATE_PLAYER_EVENT")
 PLAYER_LOGIN_EVENT = os.getenv("PLAYER_LOGIN_EVENT")
 RETENTION_DAYS = os.getenv("RETENTION_DAYS")
-ES_USER = os.getenv("ES_USER")
-ES_PWD = os.getenv("ES_PWD")
-ES_URL = os.getenv("ES_URL")
 ES_INDEX = os.getenv("ES_INDEX", "retention")
 
-ARG_DATE_FORMAT = "%Y-%m-%d"
-INVALID_VALUE = -1
 RETENTION_DAY_PREFIX = "day"
 COMMA = ","
 
-YEAR = "year"
-MONTH = "month"
-DAY = "day"
-FILE_PATH_DATES = {
-    YEAR: ["<yyyy>"],
-    MONTH: ["<MM>", "<M>"],
-    DAY: ["<dd>", "<d>"]
-}
-
-FILE_PATH_DOUBLE_DIGITS_DATE = {"<MM>", "<dd>"}
-
 logger = eslog.get_logger(ES_INDEX)
-
-es_headers = {"Content-Type": "application/json"}
-es_auth = HTTPBasicAuth(ES_USER, ES_PWD)
-
 bucket = None
-requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 
 def valid_params():
     params_errors = []
-    if is_empty(S3_BUCKET):
-        params_errors.append("S3_BUCKET")
 
-    if is_empty(S3_KEY_PREFIX_CREATE_PLAYER):
+    if util.is_empty(S3_KEY_PREFIX_CREATE_PLAYER):
         params_errors.append("S3_KEY_PREFIX_CREATE_PLAYER")
 
-    if is_empty(S3_KEY_PREFIX_PLAYER_LOGIN):
+    if util.is_empty(S3_KEY_PREFIX_PLAYER_LOGIN):
         params_errors.append("S3_KEY_PREFIX_PLAYER_LOGIN")
 
-    if is_empty(CREATE_PLAYER_EVENT):
+    if util.is_empty(CREATE_PLAYER_EVENT):
         params_errors.append("CREATE_PLAYER_EVENT")
 
-    if is_empty(PLAYER_LOGIN_EVENT):
+    if util.is_empty(PLAYER_LOGIN_EVENT):
         params_errors.append("PLAYER_LOGIN_EVENT")
 
-    if is_empty(RETENTION_DAYS):
+    if util.is_empty(RETENTION_DAYS):
         params_errors.append("RETENTION_DAYS")
-
-    if is_empty(AWS_REGION):
-        params_errors.append("AWS_REGION")
-
-    if is_empty(ES_USER):
-        params_errors.append("ES_USER")
-
-    if is_empty(ES_PWD):
-        params_errors.append("ES_PWD")
-
-    if is_empty(ES_URL):
-        params_errors.append("ES_URL")
 
     if len(params_errors) != 0:
         logger.error(f'Params error. {params_errors} is empty')
         raise RuntimeError()
-
-
-def is_empty(s):
-    return not bool(s and s.strip())
 
 
 def arg_parse(*args, **kwargs):
@@ -98,70 +59,25 @@ def arg_parse(*args, **kwargs):
     parser.add_argument(
         "-d", "--day",
         nargs="?",
-        const=get_yesterday(),
-        type=valid_date,
-        default=get_yesterday(),
+        const=util.get_yesterday(),
+        type=util.valid_date,
+        default=util.get_yesterday(),
         help="Date. The default date is yesterday. The format is YYYY-MM-DD"
     )
     args = parser.parse_args()
     process(args.day)
 
 
-def valid_date(time_str):
-    try:
-        datetime.strptime(time_str, ARG_DATE_FORMAT)
-        if compare_date(time_str):
-            raise RuntimeError()
-        return time_str
-    except ValueError:
-        msg = "Not a valid date: '{0}'.".format(time_str)
-        raise argparse.ArgumentTypeError(msg)
-    except RuntimeError:
-        msg = "Date less than today"
-        raise argparse.ArgumentTypeError(msg)
-
-
-def compare_date(time_str):
-    nowTime_str = datetime.now().strftime(ARG_DATE_FORMAT)
-    e_time = time.mktime(time.strptime(nowTime_str, ARG_DATE_FORMAT))
-    s_time = time.mktime(time.strptime(time_str, ARG_DATE_FORMAT))
-    diff = int(s_time)-int(e_time)
-    if diff >= 0:
-        return True
-    else:
-        return False
-
-
 def process(time_str):
     valid_params()
-    init_bucket()
+    global bucket
+    bucket = s3.init_bucket_from_env()
     retentions = compute_retention(time_str)
     output_to_es(time_str, retentions)
     logger.info("Process end.")
 
 
-def init_bucket():
-    aws_access_key_id_name = "AWS_ACCESS_KEY_ID"
-    aws_secret_access_key_name = "AWS_SECRET_ACCESS_KEY"
-    aws_access_key_id = os.getenv(aws_access_key_id_name)
-    aws_secret_access_key = os.getenv(aws_secret_access_key_name)
-    if os.environ.get(aws_access_key_id_name) is not None:
-        if is_empty(aws_access_key_id):
-            os.environ.pop("AWS_ACCESS_KEY_ID")
-    if os.environ.get(aws_secret_access_key_name) is not None:
-        if is_empty(aws_secret_access_key):
-            os.environ.pop("AWS_SECRET_ACCESS_KEY")
-    global bucket
-    bucket = boto3.resource("s3", AWS_REGION).Bucket(S3_BUCKET)
-
-
-def get_yesterday():
-    yesterday = (date.today() + timedelta(-1)).strftime(ARG_DATE_FORMAT)
-    return yesterday
-
-# ==========================for compute retention==============================
-
-
+# ==========================for compute retention=============================
 def compute_retention(time_str):
     logger.info(
         f"Compute retention date:{time_str}. "
@@ -170,15 +86,16 @@ def compute_retention(time_str):
     retention_days = get_retention_days()
     if len(retention_days) == 0:
         return ret
-    today = date.today().strftime(ARG_DATE_FORMAT)
-    days = days_compute(today, time_str)
-    login_set, file_exist = get_players(PLAYER_LOGIN_EVENT, days)
+    today = date.today().strftime(util.ARG_DATE_FORMAT)
+    days = util.days_compute(today, time_str)
+    login_set, file_exist = util.get_players(
+        bucket, PLAYER_LOGIN_EVENT, S3_KEY_PREFIX_PLAYER_LOGIN, days)
     if not file_exist:
         logger.error(f"Login log file not exist. Date: {time_str}")
         return ret
     for key, values in retention_days.items():
         retention = get_retention(login_set, days + values)
-        if retention != INVALID_VALUE:
+        if retention != util.INVALID_VALUE:
             ret[key] = retention
     logger.info(f"Compute retention result:{ret}. ")
     return ret
@@ -197,29 +114,15 @@ def get_retention_days():
     return ret
 
 
-def days_compute(today, any_day):
-    date1 = datetime.strptime(today, ARG_DATE_FORMAT)
-    date2 = datetime.strptime(any_day, ARG_DATE_FORMAT)
-    return (date2-date1).days
-
-
 def get_retention(login_set, days):
-    create_set, _ = get_players(CREATE_PLAYER_EVENT, days)
+    create_set, _ = util.get_players(
+        bucket, CREATE_PLAYER_EVENT, S3_KEY_PREFIX_CREATE_PLAYER, days)
     ceate_size = len(create_set)
     if ceate_size == 0:
-        return INVALID_VALUE
+        return util.INVALID_VALUE
     intersection_set = create_set.intersection(login_set)
     login_size = len(intersection_set)
     return round(login_size/ceate_size, 2)
-
-
-def get_date_paths(event, day):
-    paths = []
-    days = util.get_days_for_timezone(day)
-    for d in days:
-        get_date_path(event, d)
-        paths.append(get_date_path(event, d))
-    return paths
 
 
 def get_date_path(event, day):
@@ -245,105 +148,25 @@ def get_date_path(event, day):
     path = path.replace(has_dates[DAY], day)
     return path
 
-
-def get_date_month(has_dates, d):
-    if has_dates[MONTH] in FILE_PATH_DOUBLE_DIGITS_DATE:
-        return d.strftime("%m")
-    return str(d.month)
-
-
-def get_date_day(has_dates, d):
-    if has_dates[DAY] in FILE_PATH_DOUBLE_DIGITS_DATE:
-        return d.strftime("%d")
-    return str(d.day)
-
-
-def get_players(event, day):
-    player_set = set()
-    filter_prefixs = get_date_paths(event, day)
-    if len(filter_prefixs) == 0:
-        return player_set, False
-    start_time = util.get_start_timestamp(day)
-    end_time = util.get_end_timestamp(day)
-    for filter_prefix in filter_prefixs:
-        if file_exist(filter_prefix):
-            add_player(player_set, event, filter_prefix, start_time, end_time)
-    logger.info(
-        f"Get players event:{event} ."
-        f"file prefixs:{filter_prefixs} ."
-        f"player size: {len(player_set)}")
-    return player_set, True
-
-
-def add_player(player_set, event, filter_prefix, start_time, end_time):
-    for obj in bucket.objects.filter(Prefix=filter_prefix):
-        stream = encodings.utf_8.StreamReader(obj.get()["Body"])
-        stream.readline
-        for line in stream:
-            player_id = get_player_id(event, line, start_time, end_time)
-            if player_id != INVALID_VALUE:
-                player_set.add(player_id)
-
-
-def file_exist(filter_prefix):
-    files = bucket.objects.filter(Prefix=filter_prefix)
-    size = 0
-    for b in files:
-        size = size + 1
-    if size == 0:
-        logger.warn(f"File not exist. file name: {filter_prefix}",)
-        return False
-    for obj in files:
-        if obj.key.find(filter_prefix) < 0:
-            logger.warn(f"File not exist. file name: {filter_prefix}")
-            return False
-    return True
-
-
-# log format:time event json obj
-def get_player_id(event, line, start_time, end_time):
-    sub_lines = line.split(" ")
-    if len(sub_lines) < 3:
-        raise RuntimeError()
-    try:
-        obj = json.loads(sub_lines[2])
-        if sub_lines[1] == event:
-            log_time = int(sub_lines[0])
-            if log_time >= start_time and log_time < end_time:
-                return obj["player_id"]
-    except json.JSONDecodeError:
-        logger.error(f"Json parse error. json string is: {line}")
-    return INVALID_VALUE
-
 # ==========================for output to es=============================
 
 
 def output_to_es(time_str, retentions):
     if len(retentions) == 0:
         return
-    global ES_URL
-    if ES_URL != "/" and ES_URL.endswith("/"):
-        ES_URL = ES_URL[:-1]
-    logger.info(f"Output to es. adress: {ES_URL}")
     for key, values in retentions.items():
         es_add_doc(time_str, key, values)
 
 
 def es_add_doc(time_str, retention_day, retention):
-    url = ES_URL + "/" + ES_INDEX + \
+    path = ES_INDEX + \
         "/_doc/" + es_get_doc_id(time_str, retention_day)
-    index_doc = es_get_doc(time_str, retention_day, retention)
-    response = requests.put(url, headers=es_headers,
-                            data=index_doc, verify=False, auth=es_auth)
-    if (response.status_code != requests.codes.ok and
-            response.status_code != requests.codes.created):
-        http_error_log(url, response)
-        raise requests.HTTPError(response)
-    logger.info(f"Add doc success. url: {url}")
+    data = es_get_doc(time_str, retention_day, retention)
+    es.add_doc(path, data)
 
 
 def es_get_doc(time_str, retention_day, retention):
-    timestamp = get_timestamp(time_str)
+    timestamp = util.get_timestamp(time_str)
     data = {
         "@timestamp": timestamp,
         "type": retention_day,
@@ -360,13 +183,8 @@ def http_error_log(url, response):
 
 def es_get_doc_id(time_str, retention_day):
     str_time = datetime.strptime(
-        time_str, ARG_DATE_FORMAT).strftime(ARG_DATE_FORMAT)
+        time_str, util.ARG_DATE_FORMAT).strftime(util.ARG_DATE_FORMAT)
     return str_time + "_" + retention_day
-
-
-def get_timestamp(time_str):
-    return datetime.strptime(
-        time_str, ARG_DATE_FORMAT).replace(microsecond=0).isoformat()
 
 
 def test_output_to_es():
