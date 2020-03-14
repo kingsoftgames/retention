@@ -104,8 +104,6 @@ def compute_retention_day_count(time_str):
 
 
 def compute_retention_week_count(time_str):
-    print(type(time_str))
-    print(time_str)
     logger.info(
         f"Compute retention_week_count date:{time_str}. ")
     login_days = util.get_previous_one_week_days(time_str)

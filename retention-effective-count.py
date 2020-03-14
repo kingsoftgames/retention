@@ -100,7 +100,6 @@ def get_create_players(time_str):
     if not file_exist:
         logger.error(
             f"Create log file not exist. Date: {create_day}")
-    print("======================================")
     return create_set
 
 
@@ -118,8 +117,6 @@ def get_login_players(start_date, end_date):
 
 
 def compute_count(create_set, login_counter):
-    print(create_set)
-    print(login_counter)
     if len(create_set) == 0:
         return util.INVALID_VALUE, util.INVALID_VALUE
     create_effective = 0

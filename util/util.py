@@ -339,7 +339,6 @@ def get_date_list(start, end):
 
 
 def get_previous_one_week(time_str):
-    print(time_str)
     d = datetime.strptime(time_str, ARG_DATE_FORMAT)
     dayscount = timedelta(days=d.isoweekday())
     dayto = d - dayscount
