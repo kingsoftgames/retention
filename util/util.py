@@ -5,6 +5,8 @@ import json
 import time
 from datetime import datetime, date, timedelta
 import encodings
+from multipledispatch import dispatch
+from collections import Counter
 
 ARG_DATE_FORMAT = "%Y-%m-%d"
 INVALID_VALUE = -1
@@ -52,8 +54,11 @@ def is_empty(s):
 
 
 def get_yesterday():
-    yesterday = (date.today() + timedelta(-1)).strftime(ARG_DATE_FORMAT)
-    return yesterday
+    return get_some_day(-1)
+
+
+def get_some_day(days):
+    return (date.today() + timedelta(days)).strftime(ARG_DATE_FORMAT)
 
 
 def get_prefix(s3_key_prefix, days):
@@ -95,30 +100,34 @@ def get_date_paths(s3_key_prefix, day):
     return paths
 
 
-def get_players_multiple_days(bucket, event, s3_key_prefix, days):
-    filter_prefixs_set = set()
-    player_set = set()
+def get_date_paths_for_multiple_days(s3_key_prefix, days):
     today = date.today().strftime(ARG_DATE_FORMAT)
+    filter_prefixs_set = set()
     for day in days:
         d = days_compute(today, day)
         filter_prefixs = get_date_paths(s3_key_prefix, d)
         if len(filter_prefixs) > 0:
             filter_prefixs_set.update(filter_prefixs)
+    return filter_prefixs_set
+
+
+def get_players_multiple_days(bucket, event, s3_key_prefix, days, players):
+    filter_prefixs_set = get_date_paths_for_multiple_days(s3_key_prefix, days)
     if len(filter_prefixs_set) == 0:
-        return player_set, True
+        return False
     start_time = get_start_timestamp_time_str(days[0])
     end_time = get_end_timestamp_time_str(days[-1])
     for filter_prefix in filter_prefixs_set:
         if file_exist(bucket, filter_prefix, event):
             add_player(
-                bucket, player_set, event, filter_prefix, start_time, end_time)
+                bucket, players, event, filter_prefix, start_time, end_time)
     logger.info(
         f"Get players event:{event} ."
         f"file prefixs:{filter_prefixs_set} ."
         f"Date start: {days[0]} ."
         f"end: {days[-1]}."
-        f"player size: {len(player_set)}")
-    return player_set, True
+        f"player size: {len(players)}")
+    return True
 
 
 def get_players(bucket, event, s3_key_prefix, day):
@@ -129,7 +138,6 @@ def get_players(bucket, event, s3_key_prefix, day):
     start_time = get_start_timestamp(day)
     end_time = get_end_timestamp(day)
     for filter_prefix in filter_prefixs:
-        print(filter_prefix)
         if file_exist(bucket, filter_prefix, event):
             add_player(
                 bucket, player_set, event, filter_prefix, start_time, end_time)
@@ -140,14 +148,25 @@ def get_players(bucket, event, s3_key_prefix, day):
     return player_set, True
 
 
-def add_player(bucket, player_set, event, filter_prefix, start_time, end_time):
+def add_player(bucket, players, event, filter_prefix, start_time, end_time):
+    ret = set()
     for obj in bucket.objects.filter(Prefix=filter_prefix):
         stream = encodings.utf_8.StreamReader(obj.get()["Body"])
         stream.readline
         for line in stream:
             player_id = get_player_id(event, line, start_time, end_time)
             if player_id != INVALID_VALUE:
-                player_set.add(player_id)
+                add_player_id(players, player_id)
+
+
+@dispatch(set, str)
+def add_player_id(players, player_id):
+    players.add(player_id)
+
+
+@dispatch(Counter, str)
+def add_player_id(players, player_id):
+    players.update([player_id])
 
 
 # log format:time event json obj
@@ -354,3 +373,8 @@ def get_previous_one_month(time_str):
         f"week month:{date_to} ."
         f"compute date: {time_str}")
     return date_from, date_to
+
+
+def get_some_day_of_one_day(time_str, days):
+    one_day = datetime.strptime(time_str, ARG_DATE_FORMAT)
+    return (one_day + timedelta(days)).strftime(ARG_DATE_FORMAT)
