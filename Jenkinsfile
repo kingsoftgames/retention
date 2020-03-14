@@ -49,7 +49,7 @@ pipeline {
         stage('Package') {
             steps {
                 script {
-                    def artifactName = artifactName(name: 'rentention', extension: "tar.gz")
+                    def artifactName = artifactName(name: 'retention', extension: "tar.gz")
                     dir(env.RETENTION_ARCHIVE_DIR) {
                         sh "tar czf ${env.WORKSPACE}/${artifactName} *"
                     }
