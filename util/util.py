@@ -190,9 +190,9 @@ def get_logs(bucket, event, s3_key_prefix, days):
     filter_prefix = get_prefix(s3_key_prefix, days)
     if not file_exist(bucket, filter_prefix, event):
         return logs, False
-    start_time = get_start_timestamp(day)
-    end_time = get_end_timestamp(day)
-    add_logs(bucket, logs, event, filter_prefix)
+    start_time = get_start_timestamp(days)
+    end_time = get_end_timestamp(days)
+    add_logs(bucket, logs, event, filter_prefix, start_time, end_time)
     logger.info(
         f"Get logs event:{event} ."
         f"file prefix:{filter_prefix} ."
