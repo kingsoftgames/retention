@@ -8,6 +8,8 @@ import encodings
 from multipledispatch import dispatch
 from collections import Counter
 
+from model import LoginsByDayAndCounter
+
 ARG_DATE_FORMAT = "%Y-%m-%d"
 INVALID_VALUE = -1
 YEAR = "year"
@@ -154,19 +156,28 @@ def add_player(bucket, players, event, filter_prefix, start_time, end_time):
         stream = encodings.utf_8.StreamReader(obj.get()["Body"])
         stream.readline
         for line in stream:
-            player_id = get_player_id(event, line, start_time, end_time)
-            if player_id != INVALID_VALUE:
-                add_player_id(players, player_id)
+            player_id_and_time = get_player_id(
+                event, line, start_time, end_time)
+            if player_id_and_time[0] != INVALID_VALUE:
+                add_player_id(players, player_id_and_time)
 
 
-@dispatch(set, str)
-def add_player_id(players, player_id):
-    players.add(player_id)
+@dispatch(set, tuple)
+def add_player_id(players, player_id_and_time):
+    players.add(player_id_and_time[0])
 
 
-@dispatch(Counter, str)
-def add_player_id(players, player_id):
-    players.update([player_id])
+@dispatch(Counter, tuple)
+def add_player_id(players, player_id_and_time):
+    players.update([player_id_and_time[0]])
+
+
+@dispatch(LoginsByDayAndCounter, tuple)
+def add_player_id(players, player_id_and_time):
+    time = get_local_time_str(player_id_and_time[1])
+    player_id = player_id_and_time[0]
+    players.update(player_id)
+    players.put(time, player_id)
 
 
 # log format:time event json obj
@@ -179,10 +190,10 @@ def get_player_id(event, line, start_time, end_time):
         if sub_lines[1] == event:
             log_time = int(sub_lines[0])
             if log_time >= start_time and log_time < end_time:
-                return obj["player_id"]
+                return (obj["player_id"], log_time)
     except json.JSONDecodeError:
         logger.error(f"Json parse error. json string is: {line}")
-    return INVALID_VALUE
+    return (INVALID_VALUE, INVALID_VALUE)
 
 
 def get_logs(bucket, event, s3_key_prefix, days):
@@ -377,3 +388,8 @@ def get_previous_one_month(time_str):
 def get_some_day_of_one_day(time_str, days):
     one_day = datetime.strptime(time_str, ARG_DATE_FORMAT)
     return (one_day + timedelta(days)).strftime(ARG_DATE_FORMAT)
+
+
+def get_local_time_str(timestamp):
+    timeArray = time.localtime(timestamp)
+    return time.strftime(ARG_DATE_FORMAT, timeArray)
