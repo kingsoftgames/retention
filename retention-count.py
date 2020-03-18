@@ -61,6 +61,7 @@ def arg_parse(*args, **kwargs):
 
 
 # 每天计算日留存数量，每个星期一计算周留存数量，每个月1号计算月留存数量
+# 添加计算流失数量，月流失和周流失,对应的是月留存和周留存
 def process(time_str):
     valid_params()
     global bucket
@@ -138,9 +139,13 @@ def get_retention_count(create_days, login_days):
         logger.error(
             f"Login log file not exist. Date satrt: {login_days[0]}"
             f"end:{login_days[-1]} .")
-    ret = compute_count(login_set, create_set)
-    logger.info(f"Compute retention result:{ret}. ")
-    return (ret, ret_date)
+    retention_count = compute_count(login_set, create_set)
+    churn_count = util.INVALID_VALUE
+    if retention_count != util.INVALID_VALUE:
+        churn_count = len(create_set) - retention_count
+    logger.info(f"Compute retention count result:{retention_count}. "
+                f"Compute churn count result:{churn_count}. ")
+    return ((retention_count, churn_count), ret_date)
 
 
 def compute_count(login_set, create_set):
@@ -148,6 +153,7 @@ def compute_count(login_set, create_set):
     if ceate_size == 0:
         return util.INVALID_VALUE
     intersection_set = create_set.intersection(login_set)
+    difference_set = create_set.difference(login_set)
     login_size = len(intersection_set)
     return login_size
 
@@ -159,22 +165,26 @@ def output_to_es(retentions):
         return
     for key, values in retentions.items():
         if values[0] != util.INVALID_VALUE:
-            es_add_doc(values[1], key, values[0])
+            if key == "week" or key == "month":
+                es_add_doc(values[1], "retention_" + key, values[0][0])
+                es_add_doc(values[1], "churn_" + key, values[0][1])
+            else:
+                es_add_doc(values[1], "retention_" + key, values[0])
 
 
-def es_add_doc(time_str, retention_type, retention_count):
+def es_add_doc(time_str, compute_type, compute_count):
     path = ES_INDEX + \
-        "/_doc/" + es_get_doc_id(time_str, retention_type)
-    data = es_get_doc(time_str, retention_type, retention_count)
+        "/_doc/" + es_get_doc_id(time_str, compute_type)
+    data = es_get_doc(time_str, compute_type, compute_count)
     es.add_doc(path, data)
 
 
-def es_get_doc(time_str, retention_type, retention_count):
+def es_get_doc(time_str, compute_type, compute_count):
     timestamp = util.get_timestamp(time_str)
     data = {
         "@timestamp": timestamp,
-        "type": "count_" + retention_type,
-        "retention_count": retention_count
+        "count": compute_count,
+        "type": compute_type + "_count"
     }
     return json.dumps(data)
 
