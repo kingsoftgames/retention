@@ -85,20 +85,19 @@ def compute_retention_count(time_str):
 def compute_retention_day_count(time_str):
     logger.info(
         f"Compute retention_day_count date:{time_str}. ")
-    ret = {}
     today = date.today().strftime(util.ARG_DATE_FORMAT)
     days = util.days_compute(today, time_str)
     login_set, file_exist = util.get_players(
         bucket, PLAYER_LOGIN_EVENT, S3_KEY_PREFIX_PLAYER_LOGIN, days)
     if not file_exist:
         logger.error(f"Login log file not exist. Date: {time_str}")
-        return (ret, time_str)
+        return (util.INVALID_VALUE, time_str)
     days = days - 1
     create_set, file_exist = util.get_players(
         bucket, CREATE_PLAYER_EVENT, S3_KEY_PREFIX_CREATE_PLAYER, days)
     if not file_exist:
         logger.error(f"Create log file not exist. Date: {time_str}")
-        return (ret, time_str)
+        return (util.INVALID_VALUE, time_str)
     ret = compute_count(login_set, create_set)
     logger.info(f"Compute retention result:{ret}. ")
     return (ret, time_str)
@@ -130,7 +129,7 @@ def get_retention_count(create_days, login_days):
         logger.error(
             f"Create log file not exist. Date satrt: {create_days[0]}"
             f"end:{create_days[-1]} .")
-        return (util.INVALID_VALUE, ret_date)
+        return ((util.INVALID_VALUE, util.INVALID_VALUE), ret_date)
     login_set = set()
     file_exist = util.get_players_multiple_days(
         bucket, PLAYER_LOGIN_EVENT, S3_KEY_PREFIX_PLAYER_LOGIN,
@@ -164,11 +163,14 @@ def output_to_es(retentions):
     if len(retentions) == 0:
         return
     for key, values in retentions.items():
-        if values[0] != util.INVALID_VALUE:
-            if key == "week" or key == "month":
-                es_add_doc(values[1], "retention_" + key, values[0][0])
-                es_add_doc(values[1], "churn_" + key, values[0][1])
-            else:
+        if key == "week" or key == "month":
+            ret = values[0]
+            if ret[0] != util.INVALID_VALUE:
+                es_add_doc(values[1], "retention_" + key, ret[0])
+            if ret[1] != util.INVALID_VALUE:
+                es_add_doc(values[1], "churn_" + key, ret[1])
+        else:
+            if values[0] != util.INVALID_VALUE:
                 es_add_doc(values[1], "retention_" + key, values[0])
 
 
