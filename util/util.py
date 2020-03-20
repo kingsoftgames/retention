@@ -114,18 +114,19 @@ def get_date_paths_for_multiple_days(s3_key_prefix, days):
 
 
 def get_players_multiple_days(bucket, event, s3_key_prefix, days, players):
-    filter_prefixs_set = get_date_paths_for_multiple_days(s3_key_prefix, days)
-    if len(filter_prefixs_set) == 0:
+    filter_prefixs = get_date_paths_for_multiple_days(s3_key_prefix, days)
+    filter_prefixs, exist = files_exist(
+        bucket, filter_prefixs, event)
+    if not exist:
         return False
     start_time = get_start_timestamp_time_str(days[0])
     end_time = get_end_timestamp_time_str(days[-1])
-    for filter_prefix in filter_prefixs_set:
-        if file_exist(bucket, filter_prefix, event):
-            add_player(
-                bucket, players, event, filter_prefix, start_time, end_time)
+    for filter_prefix in filter_prefixs:
+        add_player(
+            bucket, players, event, filter_prefix, start_time, end_time)
     logger.info(
         f"Get players event:{event} ."
-        f"file prefixs:{filter_prefixs_set} ."
+        f"file prefixs:{filter_prefixs} ."
         f"Date start: {days[0]} ."
         f"end: {days[-1]}."
         f"player size: {len(players)}")
@@ -135,14 +136,14 @@ def get_players_multiple_days(bucket, event, s3_key_prefix, days, players):
 def get_players(bucket, event, s3_key_prefix, day):
     player_set = set()
     filter_prefixs = get_date_paths(s3_key_prefix, day)
-    if len(filter_prefixs) == 0:
+    filter_prefixs, exist = files_exist(bucket, filter_prefixs, event)
+    if not exist:
         return player_set, False
     start_time = get_start_timestamp(day)
     end_time = get_end_timestamp(day)
     for filter_prefix in filter_prefixs:
-        if file_exist(bucket, filter_prefix, event):
-            add_player(
-                bucket, player_set, event, filter_prefix, start_time, end_time)
+        add_player(
+            bucket, player_set, event, filter_prefix, start_time, end_time)
     logger.info(
         f"Get players event:{event} ."
         f"file prefixs:{filter_prefixs} ."
@@ -198,15 +199,18 @@ def get_player_id(event, line, start_time, end_time):
 
 def get_logs(bucket, event, s3_key_prefix, days):
     logs = []
-    filter_prefix = get_prefix(s3_key_prefix, days)
-    if not file_exist(bucket, filter_prefix, event):
+    filter_prefixs = get_date_paths(s3_key_prefix, days)
+    filter_prefixs, exist = files_exist(
+        bucket, filter_prefixs, event)
+    if not exist:
         return logs, False
     start_time = get_start_timestamp(days)
     end_time = get_end_timestamp(days)
-    add_logs(bucket, logs, event, filter_prefix, start_time, end_time)
+    for filter_prefix in filter_prefixs:
+        add_logs(bucket, logs, event, filter_prefix, start_time, end_time)
     logger.info(
         f"Get logs event:{event} ."
-        f"file prefix:{filter_prefix} ."
+        f"file prefix:{filter_prefixs} ."
         f"log size: {len(logs)}")
     return logs, True
 
@@ -248,6 +252,16 @@ def get_days_with_today(any_day):
     date1 = datetime.strptime(today, ARG_DATE_FORMAT)
     date2 = datetime.strptime(any_day, ARG_DATE_FORMAT)
     return (date2-date1).days
+
+
+def files_exist(bucket, filter_prefixs, event):
+    ret = set()
+    for filter_prefix in filter_prefixs:
+        if file_exist(bucket, filter_prefix, event):
+            ret.add(filter_prefix)
+    if len(ret) == 0:
+        return ret, False
+    return ret, True
 
 
 def file_exist(bucket, filter_prefix, event):
