@@ -23,6 +23,7 @@ CREATE_PLAYER_EVENT = os.getenv("CREATE_PLAYER_EVENT")
 PLAYER_LOGIN_EVENT = os.getenv("PLAYER_LOGIN_EVENT")
 RETENTION_DAYS = os.getenv("RETENTION_DAYS")
 ES_INDEX = os.getenv("ES_INDEX", "retention")
+RETENTION_TRACK_DAYS = os.getenv("RETENTION_TRACK_DAYS", 30)
 
 RETENTION_DAY_PREFIX = "day"
 COMMA = ","
@@ -68,30 +69,71 @@ def arg_parse(*args, **kwargs):
     process(args.day)
 
 
+# 计算留存，次留，周留等
+# 添加新用户留存追踪
 def process(time_str):
     valid_params()
     global bucket
     bucket = s3.init_bucket_from_env()
-    retentions = compute_retention(time_str)
+    retentions = compute(time_str)
+    print(retentions)
     output_to_es(time_str, retentions)
     logger.info("Process end.")
 
 
 # ==========================for compute retention=============================
-def compute_retention(time_str):
+
+def compute(time_str):
+    today = date.today().strftime(util.ARG_DATE_FORMAT)
+    days = util.days_compute(today, time_str)
+    login_set, file_exist = util.get_players(
+        bucket, PLAYER_LOGIN_EVENT, S3_KEY_PREFIX_PLAYER_LOGIN, days)
+    retention = compute_retention(time_str, login_set, days)
+    retention_track = compute_retention_track(time_str, login_set)
+    return {"retention": retention, "retention_track": retention_track}
+
+
+def compute_retention_track(time_str, login_set):
+    logger.info(
+        f"Compute retention track date:{time_str}. "
+        f"retention track days: {RETENTION_TRACK_DAYS}")
+    start_date = util.get_some_day_of_one_day(
+        time_str, -(RETENTION_TRACK_DAYS+1))
+    end_date = util.get_some_day_of_one_day(
+        time_str, -1)
+    create_days = util.get_date_list(start_date, end_date)
+    create_map = {}
+    ret = {}
+    file_exist = util.get_players_multiple_days(
+        bucket, CREATE_PLAYER_EVENT, S3_KEY_PREFIX_CREATE_PLAYER,
+        create_days, create_map)
+    if not file_exist:
+        logger.info(f"Create player file not exist."
+                    f" date start:{start_date}. "
+                    f" date end:{end_date}. ")
+        return ret
+    for time_str, create_set in create_map.items():
+        count = get_retention_track(time_str, login_set, create_set)
+        ret[time_str] = count
+    return ret
+
+
+def get_retention_track(time_str, login_set, create_set):
+    ceate_size = len(create_set)
+    if ceate_size == 0:
+        return util.INVALID_VALUE
+    intersection_set = create_set.intersection(login_set)
+    login_size = len(intersection_set)
+    return login_size
+
+
+def compute_retention(time_str, login_set, days):
     logger.info(
         f"Compute retention date:{time_str}. "
         f"retention days: {RETENTION_DAYS}")
     ret = {}
     retention_days = get_retention_days()
     if len(retention_days) == 0:
-        return ret
-    today = date.today().strftime(util.ARG_DATE_FORMAT)
-    days = util.days_compute(today, time_str)
-    login_set, file_exist = util.get_players(
-        bucket, PLAYER_LOGIN_EVENT, S3_KEY_PREFIX_PLAYER_LOGIN, days)
-    if not file_exist:
-        logger.error(f"Login log file not exist. Date: {time_str}")
         return ret
     for key, values in retention_days.items():
         retention = get_retention(login_set, days + values)
@@ -148,24 +190,28 @@ def get_date_path(event, day):
     path = path.replace(has_dates[DAY], day)
     return path
 
+
 # ==========================for output to es=============================
-
-
 def output_to_es(time_str, retentions):
     if len(retentions) == 0:
         return
     for key, values in retentions.items():
-        es_add_doc(time_str, key, values)
+        if key == "retention":
+            for day, rate in values.items():
+                es_add_doc_for_rate(time_str, day, rate)
+        else:
+            for create_time, count in values.items():
+                es_add_doc_for_track(time_str, key, create_time, count)
 
 
-def es_add_doc(time_str, retention_day, retention):
+def es_add_doc_for_rate(time_str, retention_day, retention):
     path = ES_INDEX + \
         "/_doc/" + es_get_doc_id(time_str, retention_day)
-    data = es_get_doc(time_str, retention_day, retention)
+    data = es_get_doc_for_rate(time_str, retention_day, retention)
     es.add_doc(path, data)
 
 
-def es_get_doc(time_str, retention_day, retention):
+def es_get_doc_for_rate(time_str, retention_day, retention):
     timestamp = util.get_timestamp(time_str)
     data = {
         "@timestamp": timestamp,
@@ -175,10 +221,16 @@ def es_get_doc(time_str, retention_day, retention):
     return json.dumps(data)
 
 
-def http_error_log(url, response):
-    logger.error(
-        f"Http error, Url;{url}. Http code ：{response.status_code}. "
-        f"Http content:{response.content}")
+def es_add_doc_for_track(time_str, retention_type, create_time, count):
+    path = ES_INDEX + \
+        "/_doc/" + es_get_doc_id(time_str, retention_type + "_" + create_time)
+    data = {
+        "@timestamp": util.get_timestamp(time_str),
+        "type": retention_type,
+        "sub_type": create_time,
+        "count": count
+    }
+    es.add_doc(path, json.dumps(data))
 
 
 def es_get_doc_id(time_str, retention_day):

@@ -173,6 +173,14 @@ def add_player_id(players, player_id_and_time):
     players.update([player_id_and_time[0]])
 
 
+@dispatch(dict, tuple)
+def add_player_id(players, player_id_and_time):
+    time_str = get_local_time_str(player_id_and_time[1])
+    player_ids = players.get(time_str, set())
+    player_ids.add(player_id_and_time[0])
+    players[time_str] = player_ids
+
+
 @dispatch(LoginsByDayAndCounter, tuple)
 def add_player_id(players, player_id_and_time):
     time = get_local_time_str(player_id_and_time[1])
