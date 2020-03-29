@@ -10,12 +10,12 @@ import re
 from datetime import datetime, date, timedelta
 import requests
 from requests.auth import HTTPBasicAuth
-from requests.packages.urllib3.exceptions import InsecureRequestWarning
 import encodings
 from eslog import eslog
 from util import util
 from s3 import s3
 from es import es
+from model import PlayerIdMap
 
 S3_KEY_PREFIX_CREATE_PLAYER = os.getenv("S3_KEY_PREFIX_CREATE_PLAYER")
 S3_KEY_PREFIX_PLAYER_LOGIN = os.getenv("S3_KEY_PREFIX_PLAYER_LOGIN")
@@ -76,7 +76,6 @@ def process(time_str):
     global bucket
     bucket = s3.init_bucket_from_env()
     retentions = compute(time_str)
-    print(retentions)
     output_to_es(time_str, retentions)
     logger.info("Process end.")
 
@@ -86,14 +85,14 @@ def process(time_str):
 def compute(time_str):
     today = date.today().strftime(util.ARG_DATE_FORMAT)
     days = util.days_compute(today, time_str)
-    login_set, file_exist = util.get_players(
+    login_map, _ = util.get_players(
         bucket, PLAYER_LOGIN_EVENT, S3_KEY_PREFIX_PLAYER_LOGIN, days)
-    retention = compute_retention(time_str, login_set, days)
-    retention_track = compute_retention_track(time_str, login_set)
+    retention = compute_retention(time_str, login_map, days)
+    retention_track = compute_retention_track(time_str, login_map)
     return {"retention": retention, "retention_track": retention_track}
 
 
-def compute_retention_track(time_str, login_set):
+def compute_retention_track(time_str, login_map):
     logger.info(
         f"Compute retention track date:{time_str}. "
         f"retention track days: {RETENTION_TRACK_DAYS}")
@@ -102,7 +101,7 @@ def compute_retention_track(time_str, login_set):
     end_date = util.get_some_day_of_one_day(
         time_str, -1)
     create_days = util.get_date_list(start_date, end_date)
-    create_map = {}
+    create_map = PlayerIdMap()
     ret = {}
     file_exist = util.get_players_multiple_days(
         bucket, CREATE_PLAYER_EVENT, S3_KEY_PREFIX_CREATE_PLAYER,
@@ -112,22 +111,29 @@ def compute_retention_track(time_str, login_set):
                     f" date start:{start_date}. "
                     f" date end:{end_date}. ")
         return ret
-    for time_str, create_set in create_map.items():
-        count = get_retention_track(time_str, login_set, create_set)
-        ret[time_str] = count
+    for platform, channels in create_map.player_id_map.items():
+        for channel, days in channels.items():
+            for day, create_set in days.items():
+                if len(create_set) == 0:
+                    continue
+                login_set, _ = login_map.get_all_day_player_ids(
+                    platform, channel)
+                count = get_retention_track(day, login_set, create_set)
+                ret[(day, platform, channel)] = count
+    logger.info(f"Compute retention track result:{ret}. ")
     return ret
 
 
 def get_retention_track(time_str, login_set, create_set):
     ceate_size = len(create_set)
     if ceate_size == 0:
-        return util.INVALID_VALUE
+        return ()
     intersection_set = create_set.intersection(login_set)
     login_size = len(intersection_set)
-    return login_size
+    return (login_size, ceate_size)
 
 
-def compute_retention(time_str, login_set, days):
+def compute_retention(time_str, login_map, days):
     logger.info(
         f"Compute retention date:{time_str}. "
         f"retention days: {RETENTION_DAYS}")
@@ -136,8 +142,8 @@ def compute_retention(time_str, login_set, days):
     if len(retention_days) == 0:
         return ret
     for key, values in retention_days.items():
-        retention = get_retention(login_set, days + values)
-        if retention != util.INVALID_VALUE:
+        retention, valid = get_retention(time_str, login_map, days + values)
+        if valid:
             ret[key] = retention
     logger.info(f"Compute retention result:{ret}. ")
     return ret
@@ -156,15 +162,25 @@ def get_retention_days():
     return ret
 
 
-def get_retention(login_set, days):
-    create_set, _ = util.get_players(
+def get_retention(time_str, login_map, days):
+    create_map, _ = util.get_players(
         bucket, CREATE_PLAYER_EVENT, S3_KEY_PREFIX_CREATE_PLAYER, days)
-    ceate_size = len(create_set)
-    if ceate_size == 0:
-        return util.INVALID_VALUE
-    intersection_set = create_set.intersection(login_set)
-    login_size = len(intersection_set)
-    return round(login_size/ceate_size, 2)
+    create_player_ids = create_map.get_total_player_ids()
+    ceates_size = len(create_map)
+    ret = {}
+    event_time = util.get_some_day(days)
+    if ceates_size == 0:
+        return ret, False
+    for platform, channels in create_player_ids.items():
+        for channel, create_set in channels.items():
+            if len(create_set) == 0:
+                continue
+            login_set, _ = login_map.get_all_day_player_ids(platform, channel)
+            intersection_set = create_set.intersection(login_set)
+            login_count = len(intersection_set)
+            create_count = len(create_set)
+            ret[(event_time, platform, channel)] = (login_count, create_count)
+    return ret, True
 
 
 def get_date_path(event, day):
@@ -197,46 +213,58 @@ def output_to_es(time_str, retentions):
         return
     for key, values in retentions.items():
         if key == "retention":
-            for day, rate in values.items():
-                es_add_doc_for_rate(time_str, day, rate)
+            for day, rates in values.items():
+                for rate_key, rate_value in rates.items():
+                    if rate_value:
+                        es_add_rate_doc(
+                            rate_key[0], key + "_" + day, rate_key, rate_value)
         else:
-            for create_time, count in values.items():
-                es_add_doc_for_track(time_str, key, create_time, count)
+            for ret_key, ret_value in values.items():
+                if ret_value:
+                    es_add_track_doc(time_str, key, ret_key, ret_value)
 
 
-def es_add_doc_for_rate(time_str, retention_day, retention):
+def es_add_rate_doc(time_str, compute_type, ret_key, ret_value):
     path = ES_INDEX + \
-        "/_doc/" + es_get_doc_id(time_str, retention_day)
-    data = es_get_doc_for_rate(time_str, retention_day, retention)
+        "/_doc/" + es_get_doc_id(
+            time_str, ret_key[1], ret_key[2], compute_type)
+    data = es_get_rate_doc(time_str, compute_type, ret_key, ret_value)
     es.add_doc(path, data)
 
 
-def es_get_doc_for_rate(time_str, retention_day, retention):
+def es_get_rate_doc(time_str, compute_type, ret_key, ret_value):
     timestamp = util.get_timestamp(time_str)
     data = {
         "@timestamp": timestamp,
-        "type": retention_day,
-        "retention": retention
+        "type": compute_type,
+        "platform": ret_key[1],
+        "channel": ret_key[2],
+        "login_count": ret_value[0],
+        "create_count": ret_value[1]
     }
     return json.dumps(data)
 
 
-def es_add_doc_for_track(time_str, retention_type, create_time, count):
+def es_add_track_doc(time_str, compute_type, ret_key, ret_value):
     path = ES_INDEX + \
-        "/_doc/" + es_get_doc_id(time_str, retention_type + "_" + create_time)
+        "/_doc/" + es_get_doc_id(
+            time_str, ret_key[1], ret_key[2], compute_type + "_" + ret_key[0])
     data = {
         "@timestamp": util.get_timestamp(time_str),
-        "type": retention_type,
-        "sub_type": create_time,
-        "count": count
+        "type": compute_type,
+        "sub_type": ret_key[0],
+        "platform": ret_key[1],
+        "channel": ret_key[2],
+        "login_count": ret_value[0],
+        "create_count": ret_value[1]
     }
     es.add_doc(path, json.dumps(data))
 
 
-def es_get_doc_id(time_str, retention_day):
+def es_get_doc_id(time_str, platform, channel, compute_type):
     str_time = datetime.strptime(
         time_str, util.ARG_DATE_FORMAT).strftime(util.ARG_DATE_FORMAT)
-    return str_time + "_" + retention_day
+    return str_time + "_" + platform + "_" + channel + "_" + compute_type
 
 
 def test_output_to_es():

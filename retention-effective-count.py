@@ -14,7 +14,7 @@ from eslog import eslog
 from util import util
 from s3 import s3
 from es import es
-from model import LoginsByDayAndCounter
+from model import PlayerIdMap
 
 AWS_REGION = os.getenv("AWS_REGION")
 S3_BUCKET = os.getenv("S3_BUCKET")
@@ -85,74 +85,105 @@ def compute(time_str):
     start_date = util.get_some_day_of_one_day(
         time_str, (-EFFECTIVE_INTERVAL) + 1)
     end_date = time_str
-    create_set = get_create_players(start_date)
-    if len(create_set) == 0:
+    creates_without_day = get_create_players(start_date)
+    if len(creates_without_day) == 0:
         return start_date, {}, {}
-    logins = get_login_players(start_date, end_date)
-    effective_ret = compute_effective_count(create_set, logins.login_counter)
-    churn_ret = compute_churn_rate(create_set, logins.login_group_by_day)
+    login_start_date = util.get_some_day_of_one_day(
+        start_date, 1)
+    login_map, login_days = get_login_players(login_start_date, end_date)
+    effective_ret = compute_effective_count(
+        creates_without_day, login_map)
+    churn_ret = compute_churn_rate(
+        creates_without_day, login_map, login_days)
     logger.info(
         f"compute effective count and churn rate. Date:{start_date} ."
+        f"end date:{end_date} ."
         f"effective count:{effective_ret} ."
         f"churn ret:{churn_ret} .")
     return start_date, effective_ret, churn_ret
 
 
-def compute_churn_rate(create_set, login_group_by_day):
+def compute_churn_rate(creates_without_day, login_map, login_days):
     days = CHURN_DAYS.split(",")
-    keys = login_group_by_day.keys()
-    keys = sorted(keys)
+    keys = sorted(login_days)
     ret = {}
     for day in days:
         surplus_day = int(day) - 1
-        compute_days = keys[surplus_day:-1]
-        compute_ret = set()
-        for compute_day in compute_days:
-            compute_ret.update(
-                login_group_by_day.get(compute_day))
-        compute_ret = create_set.difference(compute_ret)
-        key = "churn_rate_" + day + "_day"
-        churn_count = len(compute_ret)
-        ret[key] = (round(churn_count/len(create_set), 2), churn_count)
+        compute_days = keys[surplus_day:]
+        for platform, channels in creates_without_day.items():
+            for channel, create_set in channels.items():
+                if len(create_set) == 0:
+                    continue
+                compute_ret = set()
+                for compute_day in compute_days:
+                    ids, _ = login_map.get_some_day_player_ids(
+                            platform, channel, compute_day)
+                    compute_ret.update(ids)
+                compute_ret = create_set.difference(compute_ret)
+                key = "churn_rate_" + day + "_day"
+                ret[(key, platform, channel)] = (
+                    len(compute_ret), len(create_set))
     return ret
+
+
+def get_churn_rate_ret(creates, login_map, ret):
+    compute_ret = set()
+    for compute_day in compute_days:
+        compute_ret.update(
+            login_map.get_some_day_player_ids(
+                platform, channel, compute_day))
+    compute_ret = create_set.difference(compute_ret)
+    key = "churn_rate_" + day + "_day"
+    ret[(key, platform, channel)] = (
+        len(compute_ret), len(create_set))
 
 
 def get_create_players(time_str):
     today = date.today().strftime(util.ARG_DATE_FORMAT)
     create_day = util.days_compute(today, time_str)
-    create_set, file_exist = util.get_players(
+    create_map, file_exist = util.get_players(
         bucket, CREATE_PLAYER_EVENT, S3_KEY_PREFIX_CREATE_PLAYER, create_day)
     if not file_exist:
         logger.error(
             f"Create log file not exist. Date: {create_day}")
-    return create_set
+    return create_map.get_total_player_ids()
 
 
 def get_login_players(start_date, end_date):
     login_days = util.get_date_list(start_date, end_date)
-    logins = LoginsByDayAndCounter()
+    login_map = PlayerIdMap()
     file_exist = util.get_players_multiple_days(
         bucket, PLAYER_LOGIN_EVENT, S3_KEY_PREFIX_PLAYER_LOGIN,
-        login_days, logins)
+        login_days, login_map)
     if not file_exist:
         logger.error(
             f"Login log file not exist. Date satrt: {start_date}"
             f"end:{end_date} .")
-    return logins
+    return login_map, login_days
 
 
-def compute_effective_count(create_set, login_counter):
-    create_effective = 0
-    login_effective = 0
-    for create in create_set:
-        login_days = login_counter[create]
-        if login_days > CREATE_PLAYER_EFFECTIVE_DAYS:
-            create_effective = create_effective + 1
-        if login_days > PLAYER_LOGIN_EFFECTIVE_DAYS:
-            login_effective = login_effective + 1
+def compute_effective_count(creates_without_day, login_map):
     ret = {}
-    ret["effective_create_count"] = create_effective
-    ret["effective_login_count"] = login_effective
+    for platform, channels in creates_without_day.items():
+        for channel, create_set in channels.items():
+            create_effective = 0
+            login_effective = 0
+            if len(create_set) == 0:
+                continue
+            counter, has_id = login_map.get_all_day_player_ids_counter(
+                platform, channel)
+            if has_id:
+                for create in create_set:
+                    # +1 是加上创建的那天
+                    login_days = counter[create] + 1
+                    if login_days >= CREATE_PLAYER_EFFECTIVE_DAYS:
+                        create_effective = create_effective + 1
+                    if login_days >= PLAYER_LOGIN_EFFECTIVE_DAYS:
+                        login_effective = login_effective + 1
+            create_key = ("effective_create_count", platform, channel)
+            login_key = ("effective_login_count", platform, channel)
+            ret[create_key] = create_effective
+            ret[login_key] = login_effective
     return ret
 
 
@@ -160,39 +191,40 @@ def compute_effective_count(create_set, login_counter):
 def output_to_es(time_str, effective_counts, churn_rates):
     if len(effective_counts) > 0:
         for key, value in effective_counts.items():
-            if value != util.INVALID_VALUE:
-                es_add_doc(time_str, key, value)
+            es_add_doc(time_str, key, value)
     if len(churn_rates) > 0:
         for key, value in churn_rates.items():
-            if value != util.INVALID_VALUE:
-                es_add_doc(time_str, key, value)
+            es_add_doc(time_str, key, value)
 
 
-def es_add_doc(time_str, compute_type, compute_ret):
+def es_add_doc(time_str, ret_key, ret_value):
     path = ES_INDEX + \
-        "/_doc/" + es_get_doc_id(time_str, compute_type)
-    data = es_get_doc(time_str, compute_type, compute_ret)
+        "/_doc/" + es_get_doc_id(time_str, ret_key)
+    data = es_get_doc(time_str, ret_key, ret_value)
     es.add_doc(path, data)
 
 
-def es_get_doc(time_str, compute_type, compute_ret):
+def es_get_doc(time_str, ret_key, ret_value):
     timestamp = util.get_timestamp(time_str)
     data = {
         "@timestamp": timestamp,
-        "type": compute_type,
+        "type": ret_key[0],
+        "platform": ret_key[1],
+        "channel": ret_key[2]
     }
-    if "churn_rate" in compute_type:
-        data["count"] = compute_ret[1]
-        data["rate"] = compute_ret[0]
+    if "churn_rate" in ret_key[0]:
+        data["login_count"] = ret_value[0]
+        data["create_count"] = ret_value[1]
     else:
-        data["count"] = compute_ret
+        data["count"] = ret_value
     return json.dumps(data)
 
 
-def es_get_doc_id(time_str, compute_type):
+def es_get_doc_id(time_str, ret_key):
     str_time = datetime.strptime(
         time_str, util.ARG_DATE_FORMAT).strftime(util.ARG_DATE_FORMAT)
-    return str_time + "_" + compute_type
+    return str_time + "_" + ret_key[1] + "_" + \
+        ret_key[2] + "_" + ret_key[0]
 
 
 def test_output_to_es():

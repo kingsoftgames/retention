@@ -8,7 +8,7 @@ import encodings
 from multipledispatch import dispatch
 from collections import Counter
 
-from model import LoginsByDayAndCounter
+from model import PlayerIdMap
 
 ARG_DATE_FORMAT = "%Y-%m-%d"
 INVALID_VALUE = -1
@@ -134,21 +134,21 @@ def get_players_multiple_days(bucket, event, s3_key_prefix, days, players):
 
 
 def get_players(bucket, event, s3_key_prefix, day):
-    player_set = set()
+    player_map = PlayerIdMap()
     filter_prefixs = get_date_paths(s3_key_prefix, day)
     filter_prefixs, exist = files_exist(bucket, filter_prefixs, event)
     if not exist:
-        return player_set, False
+        return player_map, False
     start_time = get_start_timestamp(day)
     end_time = get_end_timestamp(day)
     for filter_prefix in filter_prefixs:
         add_player(
-            bucket, player_set, event, filter_prefix, start_time, end_time)
+            bucket, player_map, event, filter_prefix, start_time, end_time)
     logger.info(
         f"Get players event:{event} ."
         f"file prefixs:{filter_prefixs} ."
-        f"player size: {len(player_set)}")
-    return player_set, True
+        f"player size: {player_map.size()}")
+    return player_map, True
 
 
 def add_player(bucket, players, event, filter_prefix, start_time, end_time):
@@ -157,36 +157,46 @@ def add_player(bucket, players, event, filter_prefix, start_time, end_time):
         stream = encodings.utf_8.StreamReader(obj.get()["Body"])
         stream.readline
         for line in stream:
-            player_id_and_time = get_player_id(
-                event, line, start_time, end_time)
-            if player_id_and_time[0] != INVALID_VALUE:
-                add_player_id(players, player_id_and_time)
+            log = get_log(line, event, start_time, end_time)
+            if log:
+                add_player_id(players, log)
 
 
-@dispatch(set, tuple)
-def add_player_id(players, player_id_and_time):
-    players.add(player_id_and_time[0])
+@dispatch(set, dict)
+def add_player_id(players, log):
+    players.add(log["player_id"])
 
 
-@dispatch(Counter, tuple)
-def add_player_id(players, player_id_and_time):
-    players.update([player_id_and_time[0]])
-
-
-@dispatch(dict, tuple)
-def add_player_id(players, player_id_and_time):
-    time_str = get_local_time_str(player_id_and_time[1])
+@dispatch(dict, dict)
+def add_player_id(players, log):
+    time_str = get_local_time_str(log["time"])
     player_ids = players.get(time_str, set())
-    player_ids.add(player_id_and_time[0])
+    player_ids.add(log["player_id"])
     players[time_str] = player_ids
 
 
-@dispatch(LoginsByDayAndCounter, tuple)
-def add_player_id(players, player_id_and_time):
-    time = get_local_time_str(player_id_and_time[1])
-    player_id = player_id_and_time[0]
-    players.update(player_id)
-    players.put(time, player_id)
+@dispatch(PlayerIdMap, dict)
+def add_player_id(players, log):
+    time = get_local_time_str(log["time"])
+    player_id = log["player_id"]
+    players.put(time, get_platform(log), get_channel(log), player_id)
+
+
+@dispatch(set, dict)
+def add_player_id(players, log):
+    players.add(log["player_id"])
+
+
+def get_platform(log):
+    if "platform" in log:
+        return log["platform"]
+    return "UNKNOWN"
+
+
+def get_channel(log):
+    if "channel" in log:
+        return log["channel"]
+    return "UNKNOWN"
 
 
 # log format:time event json obj
@@ -237,7 +247,8 @@ def add_logs(bucket, logs, event, filter_prefix, start_time, end_time):
 def get_log(line, event, start_time, end_time):
     sub_lines = line.split(" ")
     if len(sub_lines) < 3:
-        raise RuntimeError()
+        logger.error(f"line format error. line: {line}")
+        return None
     try:
         obj = json.loads(sub_lines[2])
         if sub_lines[1] == event:

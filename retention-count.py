@@ -13,6 +13,7 @@ from eslog import eslog
 from util import util
 from s3 import s3
 from es import es
+from model import PlayerIdMap
 
 AWS_REGION = os.getenv("AWS_REGION")
 S3_BUCKET = os.getenv("S3_BUCKET")
@@ -89,15 +90,17 @@ def compute_retention_day_count(time_str):
         f"Compute retention_day_count. date:{time_str}. ")
     today = date.today().strftime(util.ARG_DATE_FORMAT)
     days = util.days_compute(today, time_str)
-    create_set, file_exist = util.get_players(
-        bucket, CREATE_PLAYER_EVENT, S3_KEY_PREFIX_CREATE_PLAYER, days - 1)
+    create_days = days - 1
+    create_map, file_exist = util.get_players(
+        bucket, CREATE_PLAYER_EVENT, S3_KEY_PREFIX_CREATE_PLAYER, create_days)
+    event_day = util.get_some_day(create_days)
     if not file_exist:
         logger.info(f"Create player file not exist. date:{time_str}. ")
-        return {"retention_day": (time_str, util.INVALID_VALUE)}
-    login_set, _ = util.get_players(
+        return {"retention_day": {time_str, {}}}
+    login_map, _ = util.get_players(
         bucket, PLAYER_LOGIN_EVENT, S3_KEY_PREFIX_PLAYER_LOGIN, days)
-    count = compute_retention_count(login_set, create_set)
-    return {"retention_day": (time_str, count)}
+    count = compute_retention_count(login_map, create_map)
+    return {"retention_day": {event_day: count}}
 
 
 def compute_week_count(time_str):
@@ -108,13 +111,13 @@ def compute_week_count(time_str):
     counts_date, counts, last_login_set = get_retention_and_churn_counts(
         one_week_ago_days, last_week_days)
     ret = {}
-    ret["retention_week"] = (counts_date, counts["retention_count"])
-    ret["churn_week"] = (counts_date, counts["churn_count"])
+    ret["retention_week"] = {counts_date: counts["retention_count"]}
+    ret["churn_week"] = {counts_date: counts["churn_count"]}
     two_week_ago_days = util.get_previous_one_week_days(
         one_week_ago_days[0])
     count = get_returning_count(
         two_week_ago_days, one_week_ago_days, last_login_set)
-    ret["returning_week"] = (last_week_days[-1], count)
+    ret["returning_week"] = {two_week_ago_days[0]: count}
     return ret
 
 
@@ -124,87 +127,107 @@ def compute_month_count(time_str):
     ret = {}
     last_month_days = util.get_previous_one_month_days(time_str)
     one_month_ago_days = util.get_previous_one_month_days(last_month_days[0])
-    counts_date, counts, last_login_set = get_retention_and_churn_counts(
+    counts_date, counts, last_login_map = get_retention_and_churn_counts(
         one_month_ago_days, last_month_days)
-    ret["retention_month"] = (counts_date, counts["retention_count"])
-    ret["churn_month"] = (counts_date, counts["churn_count"])
+    ret["retention_month"] = {counts_date: counts["retention_count"]}
+    ret["churn_month"] = {counts_date: counts["churn_count"]}
     two_month_ago_days = util.get_previous_one_month_days(
         one_month_ago_days[0])
     count = get_returning_count(
-        two_month_ago_days, one_month_ago_days, last_login_set)
-    ret["returning_month"] = (last_month_days[-1], count)
+        two_month_ago_days, one_month_ago_days, last_login_map)
+    ret["returning_month"] = {two_month_ago_days[0]: count}
     return ret
 
 
-def get_returning_count(create_days, first_login_days, second_login_set):
-    create_set = set()
+def get_returning_count(create_days, first_login_days, second_login_map):
+    create_map = PlayerIdMap()
+    ret = {}
     file_exist = util.get_players_multiple_days(
         bucket, CREATE_PLAYER_EVENT, S3_KEY_PREFIX_CREATE_PLAYER,
-        create_days, create_set)
+        create_days, create_map)
     if not file_exist:
         logger.info(f"Create player file not exist."
                     f" date start:{create_days[0]}. "
                     f" date end:{create_days[-1]}. ")
-        return (second_login_days[-1], util.INVALID_VALUE)
-    first_login_set = set()
+        return ret
+    first_login_map = PlayerIdMap()
     util.get_players_multiple_days(
         bucket, PLAYER_LOGIN_EVENT, S3_KEY_PREFIX_PLAYER_LOGIN,
-        first_login_days, first_login_set)
+        first_login_days, first_login_map)
     ret = compute_returning_count(
-        create_set, first_login_set, second_login_set)
+        create_map, first_login_map, second_login_map)
     return ret
 
 
-def compute_returning_count(create_set, first_login_set, second_login_set):
-    ceate_size = len(create_set)
+def compute_returning_count(create_map, first_login_map, second_login_map):
+    ret = {}
+    ceate_size = len(create_map)
     if ceate_size == 0:
-        return util.INVALID_VALUE
-    churn_set = create_set.difference(first_login_set)
-    returning_set = churn_set.intersection(second_login_set)
-    return len(returning_set)
+        return ret
+    create_player_ids = create_map.get_total_player_ids()
+    for platform, channels in create_player_ids.items():
+        for channel, create_set in channels.items():
+            if len(create_set) == 0:
+                continue
+            first_login_set, _ = first_login_map.get_all_day_player_ids(
+                platform, channel)
+            second_login_set, _ = second_login_map.get_all_day_player_ids(
+                platform, channel)
+            churn_set = create_set.difference(first_login_set)
+            returning_set = churn_set.intersection(second_login_set)
+            ret[(platform, channel)] = (len(returning_set), len(create_set))
+    return ret
 
 
 def get_retention_and_churn_counts(create_days, login_days):
-    ret_date = login_days[-1]
-    create_set = set()
-    login_set = set()
+    ret_date = create_days[0]
+    create_map = PlayerIdMap()
+    login_map = PlayerIdMap()
     ret = {
-        "retention_count": util.INVALID_VALUE,
-        "churn_count": util.INVALID_VALUE}
+        "retention_count": {},
+        "churn_count": {}}
     file_exist = util.get_players_multiple_days(
         bucket, CREATE_PLAYER_EVENT, S3_KEY_PREFIX_CREATE_PLAYER,
-        create_days, create_set)
+        create_days, create_map)
     if not file_exist:
         logger.info(f"Create player file not exist."
                     f" date start:{create_days[0]}. "
                     f" date end:{create_days[-1]}. ")
-        return ret_date, ret, login_set
+        return ret_date, ret, login_map
     util.get_players_multiple_days(
         bucket, PLAYER_LOGIN_EVENT, S3_KEY_PREFIX_PLAYER_LOGIN,
-        login_days, login_set)
-    retention_count = compute_retention_count(login_set, create_set)
-    churn_count = compute_churn_count(len(create_set), retention_count)
+        login_days, login_map)
+    retention_count = compute_retention_count(login_map, create_map)
+    churn_count = compute_churn_count(retention_count)
     ret = {"retention_count": retention_count, "churn_count": churn_count}
     logger.info(f"Compute retention count result:{retention_count}. "
                 f"Compute churn count result:{churn_count}. ")
-    return ret_date, ret, login_set
+    return ret_date, ret, login_map
 
 
-def compute_retention_count(login_set, create_set):
-    ceate_size = len(create_set)
+def compute_retention_count(login_map, create_map):
+    ret = {}
+    ceate_size = len(create_map)
     if ceate_size == 0:
-        return util.INVALID_VALUE
-    intersection_set = create_set.intersection(login_set)
-    difference_set = create_set.difference(login_set)
-    login_size = len(intersection_set)
-    return login_size
+        return ret
+    create_player_ids = create_map.get_total_player_ids()
+    for platform, channels in create_player_ids.items():
+        for channel, create_set in channels.items():
+            if len(create_set) == 0:
+                continue
+            login_set, _ = login_map.get_all_day_player_ids(platform, channel)
+            intersection_set = create_set.intersection(login_set)
+            login_count = len(intersection_set)
+            create_count = len(create_set)
+            ret[(platform, channel)] = (login_count, create_count)
+    return ret
 
 
-def compute_churn_count(create_size, retention_count):
-    churn_count = util.INVALID_VALUE
-    if retention_count != util.INVALID_VALUE:
-        churn_count = create_size - retention_count
-    return churn_count
+def compute_churn_count(retention_count):
+    ret = {}
+    for key, value in retention_count.items():
+        ret[key] = (value[1] - value[0], value[1])
+    return ret
 
 
 # ==========================for output to es=============================
@@ -212,31 +235,35 @@ def output_to_es(retentions):
     if len(retentions) == 0:
         return
     for key, values in retentions.items():
-        if values[1] != util.INVALID_VALUE:
-            es_add_doc(values[0], key, values[1])
+        for time_str, ret in values.items():
+            for ret_key, ret_value in ret.items():
+                es_add_doc(time_str, key + "_count", ret_key, ret_value)
 
 
-def es_add_doc(time_str, compute_type, compute_count):
+def es_add_doc(time_str, compute_type, ret_key, ret_value):
     path = ES_INDEX + \
-        "/_doc/" + es_get_doc_id(time_str, compute_type)
-    data = es_get_doc(time_str, compute_type, compute_count)
+        "/_doc/" + es_get_doc_id(time_str, compute_type, ret_key)
+    data = es_get_doc(time_str, compute_type, ret_key, ret_value)
     es.add_doc(path, data)
 
 
-def es_get_doc(time_str, compute_type, compute_count):
+def es_get_doc(time_str, compute_type, ret_key, ret_value):
     timestamp = util.get_timestamp(time_str)
     data = {
         "@timestamp": timestamp,
-        "count": compute_count,
-        "type": compute_type + "_count"
+        "platform": ret_key[0],
+        "channel": ret_key[1],
+        "count": ret_value[0],
+        "type": compute_type
     }
     return json.dumps(data)
 
 
-def es_get_doc_id(time_str, retention_type):
+def es_get_doc_id(time_str, compute_type, ret_key):
     str_time = datetime.strptime(
         time_str, util.ARG_DATE_FORMAT).strftime(util.ARG_DATE_FORMAT)
-    return str_time + "_count_" + retention_type
+    return str_time + "_" + ret_key[0] + "_" + ret_key[1] + "_" +\
+        compute_type
 
 
 def test_output_to_es():

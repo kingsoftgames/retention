@@ -1,1 +1,1 @@
-from .model import LoginsByDayAndCounter
+from .model import PlayerIdMap
