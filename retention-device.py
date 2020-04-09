@@ -26,6 +26,7 @@ PLAYER_LOGIN_EVENT = os.getenv("PLAYER_LOGIN_EVENT")
 RETENTION_DAYS = os.getenv("RETENTION_DAYS")
 ES_INDEX = os.getenv("ES_INDEX", "retention")
 RETENTION_TRACK_DAYS = os.getenv("RETENTION_TRACK_DAYS", 30)
+GPERF_INDEX_PREFIX = os.getenv("GPERF_INDEX_PREFIX", "gperf-index-")
 
 RETENTION_DAY_PREFIX = "day"
 COMMA = ","
@@ -158,12 +159,11 @@ def get_retention(time_str, login_map, days):
 def get_devices(time_str):
     str_time = time.strftime(
         "%Y.%m.%d", time.strptime(time_str, util.ARG_DATE_FORMAT))
-    index = "gperf-index-" + str_time
+    index = GPERF_INDEX_PREFIX + str_time
     ret = {}
     logger.info("Get devices from es")
     logs = es.query_match_all(index, es.get_match_all_dsl())
     logger.info(f"Devices size is {len(logs)}")
-    print(logs)
     for log in logs:
         ret[log["_source"]["tags"]["player_id"]] = (
             log["_source"]["device"]["vendor"],
